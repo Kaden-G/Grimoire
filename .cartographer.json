@@ -1,0 +1,39 @@
+{
+  "tree": {
+    "name": "Cartographer",
+    "description": "Project root",
+    "files": [
+      {
+        "name": "cartographer.py",
+        "purpose": "Python module: cartographer",
+        "tags": [
+          "python",
+          "ai"
+        ]
+      },
+      {
+        "name": "HANDOFF.md",
+        "purpose": "Documentation: HANDOFF",
+        "tags": [
+          "docs"
+        ]
+      },
+      {
+        "name": "project-cartographer.jsx",
+        "purpose": "\u2014",
+        "tags": [
+          "react"
+        ]
+      }
+    ]
+  },
+  "basePath": "/sessions/serene-admiring-tesla/mnt/Cartographer",
+  "readme": "",
+  "generatedAt": "2026-03-27T04:05:51Z",
+  "model": "heuristics-only",
+  "hasSnippets": true,
+  "snippets": {
+    "Cartographer/cartographer.py": "#!/usr/bin/env python3\n\"\"\"\nProject Cartographer \u2014 CLI\nWalks a project directory, generates AI-powered descriptions for every file\nand folder, and outputs a .cartographer.json for the Cartographer UI.\n\nUsage:\n    python cartographer.py /path/to/your/project\n    python cartographer.py /path/to/your/project --key sk-ant-...\n    python cartographer.py /path/to/your/project --batch-size 30 --model claude-sonnet-4-20250514\n\nThe tool will:\n  1. Walk the directory tree (respecting .gitignore-style exclusions)\n  2. Read README.md if present for project context\n  3. Apply heuristic descriptions based on file/folder naming conventions\n  4. Call the Claude API to generate context-aware descriptions\n  5. Save .cartographer.json in the project root\n\"\"\"\n\nimport os\nimport sys\nimport json\nimport argparse\nimport time\nimport re\nfrom pathlib import Path\n\ntry:\n    import anthropic\n    HAS_SDK = True\nexcept ImportError:\n    HAS_SDK = False\n    try:\n        import urllib.request\n        import urllib.error\n    except ImportError:\n        pass\n\n# \u2500\u2500\u2500 Default exclusions \u2500\u2500\u2500\nDEFAULT_EXCLUDE = {",
+    "Cartographer/project-cartographer.jsx": "import { useState, useMemo, useRef, useEffect, useCallback } from \"react\";\n\n// \u2500\u2500\u2500 Colors \u2500\u2500\u2500\nconst C = {\n  bg: \"#0a0e17\", surface: \"#111827\", surfaceHover: \"#1a2236\", surfaceActive: \"#1e293b\",\n  border: \"#1e2d44\", borderHover: \"#2d4a6f\", accent: \"#38bdf8\", accentDim: \"#0c4a6e\",\n  accentGlow: \"rgba(56,189,248,0.15)\", text: \"#e2e8f0\", textDim: \"#64748b\", textMuted: \"#475569\",\n  file: \"#a78bfa\", folder: \"#38bdf8\", tag: \"#334155\", tagText: \"#94a3b8\",\n  green: \"#34d399\", greenDim: \"#064e3b\", yellow: \"#fbbf24\", yellowBg: \"rgba(251,191,36,0.12)\",\n  red: \"#f87171\", redDim: \"#7f1d1d\",\n};\n\nconst MONO = \"'JetBrains Mono','Fira Code',monospace\";\nconst SANS = \"'Inter','Segoe UI',system-ui,sans-serif\";\n\n// \u2500\u2500\u2500 Heuristics \u2500\u2500\u2500\nconst FILE_EXACT = {\n  \"package.json\": \"Project dependencies, scripts, and metadata\",\n  \"package-lock.json\": \"Locked dependency versions (auto-generated)\",\n  \"yarn.lock\": \"Locked dependency versions (auto-generated)\",\n  \"tsconfig.json\": \"TypeScript compiler configuration\",\n  \"jsconfig.json\": \"JavaScript project configuration and path aliases\",\n  \"README.md\": \"Project documentation and setup guide\",\n  \"readme.md\": \"Project documentation and setup guide\",\n  \"LICENSE\": \"Software license terms\",\n  \"LICENSE.md\": \"Software license terms\",\n  \".gitignore\": \"Files and directories excluded from version control\",\n  \".eslintrc.js\": \"ESLint code linting rules\",\n  \".eslintrc.json\": \"ESLint code linting rules\",\n  \".prettierrc\": \"Prettier code formatting config\",\n  \"Dockerfile\": \"Container image build instructions\",\n  \"docker-compose.yml\": \"Multi-container orchestration config\",\n  \"docker-compose.yaml\": \"Multi-container orchestration config\",\n  \"Makefile\": \"Build automation commands\",\n  \".env\": \"Environment variables (secrets, config values)\",\n  \".env.example\": \"Template for required environment variables\",\n  \".env.local\": \"Local environment overrides (not committed)\",\n  \"vite.config.ts\": \"Vite bundler configuration\",\n  \"vite.config.js\": \"Vite bundler configuration\",\n  \"webpack.config.js\": \"Webpack bundler configuration\","
+  }
+}

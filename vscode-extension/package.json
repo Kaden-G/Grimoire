@@ -1,0 +1,192 @@
+{
+  "name": "grimoire",
+  "displayName": "Grimoire",
+  "description": "Your codebase, decoded — AI-powered treemap visualization, inline annotation, import-based tags, and plain-English descriptions for any project",
+  "version": "0.1.0",
+  "publisher": "godinez-llc",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grimoire-dev/grimoire"
+  },
+  "homepage": "https://grimoire.dev",
+  "bugs": {
+    "url": "https://github.com/grimoire-dev/grimoire/issues"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other",
+    "Education"
+  ],
+  "galleryBanner": {
+    "color": "#0a0e17",
+    "theme": "dark"
+  },
+  "keywords": [
+    "codebase",
+    "map",
+    "treemap",
+    "navigation",
+    "explorer",
+    "AI",
+    "code annotation",
+    "code comments",
+    "project map",
+    "vibe coder"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "grimoire",
+          "title": "Grimoire",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "grimoire": [
+        {
+          "id": "grimTree",
+          "name": "Grimoire",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "grim.scan",
+        "title": "Grimoire: Scan Workspace",
+        "icon": "$(search)"
+      },
+      {
+        "command": "grim.scanWithAI",
+        "title": "Grimoire: Scan with AI Descriptions"
+      },
+      {
+        "command": "grim.openMap",
+        "title": "Grimoire: Open Interactive Map",
+        "icon": "$(map)"
+      },
+      {
+        "command": "grim.refresh",
+        "title": "Grimoire: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "grim.openFile",
+        "title": "Open File"
+      },
+      {
+        "command": "grim.searchByTag",
+        "title": "Grimoire: Search by Tag",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "grim.annotateFile",
+        "title": "Grimoire: Annotate Current File",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "grim.annotateWorkspace",
+        "title": "Grimoire: Annotate Entire Workspace",
+        "icon": "$(comment-unresolved)"
+      },
+      {
+        "command": "grim.setup",
+        "title": "Grimoire: Setup / API Key",
+        "icon": "$(key)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "grim.scan",
+          "when": "view == grimTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "grim.openMap",
+          "when": "view == grimTree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "grim.refresh",
+          "when": "view == grimTree",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "grim.annotateFile",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "grim.annotateFile",
+          "group": "grimoire"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Grimoire",
+      "properties": {
+        "grim.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API key for AI-powered descriptions (or set ANTHROPIC_API_KEY env var)"
+        },
+        "grim.model": {
+          "type": "string",
+          "default": "claude-sonnet-4-20250514",
+          "description": "Claude model to use for AI descriptions"
+        },
+        "grim.batchSize": {
+          "type": "number",
+          "default": 20,
+          "description": "Number of files per AI batch request"
+        },
+        "grim.exclude": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Additional directories to exclude from scanning"
+        },
+        "grim.scanHeaders": {
+          "type": "boolean",
+          "default": true,
+          "description": "Read first 40 lines of source files for better AI context and tag inference"
+        },
+        "grim.plainEnglish": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "**Recommended for most users.** Write descriptions in plain English — no jargon like API, ORM, or middleware. Describes what each file *does* in everyday language, perfect for vibe coders and non-technical teammates."
+        },
+        "grim.defaultAnnotationMode": {
+          "type": "string",
+          "default": "tutor",
+          "enum": ["tutor", "minimal", "technical", "non-technical"],
+          "enumDescriptions": [
+            "Teaching mode — explains WHY, names patterns, builds understanding",
+            "Just the essentials — one-line signpost comments",
+            "Best-practice annotations with proper terminology and patterns",
+            "Plain English — no jargon, real-world explanations"
+          ],
+          "markdownDescription": "Default annotation mode when running **Annotate Current File**. You can always change it from the picker."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0"
+  }
+}
