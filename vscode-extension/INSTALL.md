@@ -27,11 +27,11 @@ Once installed, you'll see a **spellbook icon** in the Activity Bar (left sideba
 
 | Command | What it does |
 |---------|-------------|
-| **Grimoire: Scan Workspace** | Walks your project, applies heuristic descriptions + import-based tags, saves `.grimoire.json` |
-| **Grimoire: Scan with AI Descriptions** | Same as above but also calls Claude API for 10-word descriptions of every file |
-| **Grimoire: Open Interactive Map** | Opens the visual treemap in a webview tab with search, breadcrumb nav, and code previews |
+| **Grimoire: Scan Project** | Maps your project in one guided flow — picks description style, optional inline comments, then scans everything |
+| **Grimoire: Open Interactive Map** | Opens the visual codebase map with search, breadcrumb nav, and scrollable file/folder list |
 | **Grimoire: Search by Tag** | Quick-pick filter to find all files tagged `api`, `auth`, `database`, etc. |
 | **Grimoire: Annotate Current File** | Add AI-generated inline comments to the open file (choose from 4 modes) |
+| **Grimoire: Annotate Entire Workspace** | Add AI comments to all source files (with git safety checks) |
 | **Grimoire: Refresh** | Reloads from `.grimoire.json` |
 
 ### Sidebar Tree
@@ -45,12 +45,12 @@ The Grimoire sidebar shows your project tree with:
 ### Interactive Map (Webview)
 
 The full map view includes:
-- **Treemap layout** — Miro-style proportional rectangles so you can see your whole project at once
+- **Scrollable list layout** — folders and files in full-width rows with complete descriptions visible
 - **Breadcrumb navigation** — click any path segment to jump up
-- **Search** — search across file names, descriptions, tags, and paths
+- **Search** — `Cmd+K` / `Ctrl+K` to search across file names, descriptions, tags, and paths
 - **Color-coded tags** — inferred from imports (api=blue, auth=pink, database=green, ai=yellow)
-- **Code preview** — click `▸ code` to see the first 20 lines of any source file
-- **Click to open** — click any file card to open it in VS Code
+- **Adjustable text size** — S (12px), M (14px), L (16px) via floating toolbar
+- **Click to open** — click any file to open it in VS Code
 
 ### Annotate Current File
 
