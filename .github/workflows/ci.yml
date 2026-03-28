@@ -1,0 +1,44 @@
+# Grimoire Pro — CI Pipeline
+# Runs on every push and PR to main. This is the status check
+# you'll require in branch protection rules.
+#
+# What it checks:
+#   1. TypeScript compiles with zero errors (catches type bugs)
+#   2. All tests pass (catches logic bugs)
+#
+# SECURITY: No secrets needed — tests mock the DB and external APIs.
+# This means PRs from forks can run CI safely (no secret leakage risk).
+
+name: CI
+
+on:
+  push:
+    branches: [main, 'pro/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Type Check & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npx vitest run

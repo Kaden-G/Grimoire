@@ -1,0 +1,31 @@
+{
+  "name": "grimoire-pro-server",
+  "version": "0.1.0",
+  "description": "Grimoire Pro API proxy — auth, billing, and usage metering for the paid tier",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "@hono/node-server": "^1.13.0",
+    "postgres": "^3.4.5",
+    "stripe": "^17.5.0",
+    "jose": "^6.0.0",
+    "nanoid": "^5.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
