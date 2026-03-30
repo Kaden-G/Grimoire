@@ -408,7 +408,10 @@ async function annotateWorkspace(apiKey, model) {
       'Annotate Anyway',
       'Cancel'
     );
-    if (proceed !== 'Annotate Anyway') return;
+    if (proceed !== 'Annotate Anyway') {
+      vscode.window.showInformationMessage('Grimoire: Workspace annotation cancelled.');
+      return;
+    }
   } else if (!hasGit) {
     const proceed = await vscode.window.showWarningMessage(
       'Grimoire: This folder is not a git repo. Bulk annotation modifies files in-place with no easy undo. Consider initializing git first.',
@@ -416,7 +419,10 @@ async function annotateWorkspace(apiKey, model) {
       'Annotate Anyway',
       'Cancel'
     );
-    if (proceed !== 'Annotate Anyway') return;
+    if (proceed !== 'Annotate Anyway') {
+      vscode.window.showInformationMessage('Grimoire: Workspace annotation cancelled.');
+      return;
+    }
   }
 
   // ─── Mode selection ───
@@ -431,7 +437,10 @@ async function annotateWorkspace(apiKey, model) {
     placeHolder: 'Choose annotation style for all files',
     title: 'Bulk Annotate Workspace',
   });
-  if (!selected) return;
+  if (!selected) {
+    vscode.window.showInformationMessage('Grimoire: Workspace annotation cancelled.');
+    return;
+  }
 
   const mode = ANNOTATION_MODES[selected._key];
 
@@ -479,12 +488,19 @@ async function annotateWorkspace(apiKey, model) {
     `Annotate ${files.length} Files`,
     'Cancel'
   );
-  if (confirm !== `Annotate ${files.length} Files`) return;
+  if (confirm !== `Annotate ${files.length} Files`) {
+    vscode.window.showInformationMessage('Grimoire: Workspace annotation cancelled.');
+    return;
+  }
 
   // ─── Process files ───
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
+  // Track individual failures so we can show the user WHICH files broke and WHY.
+  // Previously errors vanished into console.warn — the user saw "3 failed" but
+  // had no idea what went wrong or which files to retry manually.
+  const failedFiles = []; // { relPath, error }
 
   await vscode.window.withProgress(
     {
@@ -536,7 +552,11 @@ async function annotateWorkspace(apiKey, model) {
           fs.writeFileSync(filePath, annotated, 'utf8');
           succeeded++;
         } catch (err) {
+          // Log to console AND track for user-facing summary.
+          // Previously this was console.warn-only — errors were invisible to the user,
+          // making batch annotation appear to "silently do nothing" on failed files.
           console.warn(`Grimoire: Failed to annotate ${relPath}: ${err.message}`);
+          failedFiles.push({ relPath, error: err.message });
           failed++;
         }
 
@@ -548,21 +568,58 @@ async function annotateWorkspace(apiKey, model) {
     }
   );
 
-  // Summary
+  // ─── Summary with actionable failure details ───
+  // Show a clear, honest report. If files failed, the user needs to know WHICH
+  // ones and WHY so they can retry or investigate — not just a count.
   let summary = `Grimoire: Annotated ${succeeded} files with "${selected._key}" comments.`;
   if (failed > 0) summary += ` ${failed} failed.`;
   if (skipped > 0) summary += ` ${skipped} skipped (cancelled).`;
 
+  // When files failed, surface the failure details in an output channel so
+  // the user can actually see what went wrong. A notification with "3 failed"
+  // and no further info is frustrating — this is the fix.
+  if (failedFiles.length > 0) {
+    const channel = vscode.window.createOutputChannel('Grimoire — Annotation Errors');
+    channel.appendLine('═══════════════════════════════════════════════════════════');
+    channel.appendLine(`  Grimoire Bulk Annotation Report — ${new Date().toLocaleString()}`);
+    channel.appendLine(`  Mode: ${selected._key}`);
+    channel.appendLine(`  Succeeded: ${succeeded} | Failed: ${failed} | Skipped: ${skipped}`);
+    channel.appendLine('═══════════════════════════════════════════════════════════');
+    channel.appendLine('');
+    channel.appendLine('FAILED FILES:');
+    for (const { relPath, error } of failedFiles) {
+      channel.appendLine(`  ✗ ${relPath}`);
+      channel.appendLine(`    → ${error}`);
+      channel.appendLine('');
+    }
+    channel.appendLine('TIP: You can re-annotate individual files by right-clicking → "Grimoire: Annotate Current File"');
+    channel.show(true); // true = preserveFocus, so it opens the panel without stealing cursor
+  }
+
   if (hasGit && succeeded > 0) {
+    const buttons = failed > 0
+      ? ['View Git Diff', 'View Errors', 'OK']
+      : ['View Git Diff', 'OK'];
     const action = await vscode.window.showInformationMessage(
       summary + ' You can review changes with `git diff` and revert with `git checkout .` if needed.',
-      'View Git Diff',
-      'OK'
+      ...buttons
     );
     if (action === 'View Git Diff') {
       const terminal = vscode.window.createTerminal('Grimoire Diff');
       terminal.show();
       terminal.sendText('git diff --stat');
+    } else if (action === 'View Errors') {
+      vscode.commands.executeCommand('workbench.action.output.toggleOutput');
+    }
+  } else if (failed > 0 && succeeded === 0) {
+    // ALL files failed — this is the "nothing happened" scenario.
+    // Make it very obvious something went wrong instead of a quiet summary.
+    const action = await vscode.window.showErrorMessage(
+      `Grimoire: All ${failed} files failed to annotate. Check the "Grimoire — Annotation Errors" output panel for details.`,
+      'View Errors'
+    );
+    if (action === 'View Errors') {
+      vscode.commands.executeCommand('workbench.action.output.toggleOutput');
     }
   } else {
     vscode.window.showInformationMessage(summary);
