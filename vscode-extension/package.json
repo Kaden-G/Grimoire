@@ -101,6 +101,11 @@
         "icon": "$(comment-unresolved)"
       },
       {
+        "command": "grim.eraseComments",
+        "title": "Grimoire: Erase All Comments",
+        "icon": "$(trash)"
+      },
+      {
         "command": "grim.setup",
         "title": "Grimoire: Setup / API Key",
         "icon": "$(key)"
@@ -170,6 +175,17 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "**Recommended for most users.** Write descriptions in plain English — no jargon like API, ORM, or middleware. Describes what each file *does* in everyday language, perfect for vibe coders and non-technical teammates."
+        },
+        "grim.commentStrategy": {
+          "type": "string",
+          "default": "replace",
+          "enum": ["replace", "merge", "ask"],
+          "enumDescriptions": [
+            "Replace existing Grimoire comments when re-annotating (recommended)",
+            "Keep existing Grimoire comments and add new ones alongside",
+            "Ask every time — show a picker to choose Replace or Merge"
+          ],
+          "markdownDescription": "How to handle existing ᚲ Grimoire comments when re-annotating a file. **Replace** swaps old comments for new ones. **Merge** keeps both. **Ask** prompts you each time."
         },
         "grim.defaultAnnotationMode": {
           "type": "string",

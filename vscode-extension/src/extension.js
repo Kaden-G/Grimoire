@@ -10,7 +10,7 @@ const path = require('path');
 const { scanWorkspace, applyDescriptions, collectPaths } = require('./scanner');
 const { GrimoireTreeProvider } = require('./treeProvider');
 const { GrimoirePanel } = require('./webviewPanel');
-const { annotateFile, annotateWorkspace } = require('./annotator');
+const { annotateFile, annotateWorkspace, eraseAllComments } = require('./annotator');
 const { WelcomePanel } = require('./welcomePanel');
 
 let treeProvider;
@@ -345,6 +345,13 @@ function activate(context) {
 
       const model = config.get('model', 'claude-sonnet-4-20250514');
       await annotateWorkspace(apiKey, model);
+    })
+  );
+
+  // ─── Command: Erase All Grimoire Comments ───
+  context.subscriptions.push(
+    vscode.commands.registerCommand('grim.eraseComments', async () => {
+      await eraseAllComments();
     })
   );
 
