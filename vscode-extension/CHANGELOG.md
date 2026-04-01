@@ -1,9 +1,20 @@
 # Changelog
 
-## 0.1.1 — 2026-04-01
+## 0.3.0 — 2026-04-01
+
+### Features
+- Comment management system with ᚲ (Kenaz) rune tagging
+- Replace, Merge, and Erase All comment strategies
+- New `grim.eraseComments` command for full clean slate
+- New `grim.commentStrategy` setting (replace/merge/ask)
 
 ### CI/CD
-- add auto-versioning, changelog generation, and conventional commit enforcement (ce8d482)
+- Conventional commit enforcement on PRs
+- Auto version bumping from commit prefixes
+- Auto changelog generation
+- Dev build workflow with .vsix artifact
+- Manual publish workflow with dry-run option
+- Optimized .vsix packaging (764KB → 78KB)
 
 ## 0.2.1 — Marketplace Launch
 

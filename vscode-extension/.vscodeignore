@@ -5,3 +5,8 @@ node_modules/**
 .vscodeignore
 INSTALL.md
 **/*.map
+**/*.tiff
+**/*.psd
+src/__tests__/**
+*.vsix
+.grimoire.json

@@ -2,7 +2,7 @@
   "name": "grimoire",
   "displayName": "Grimoire",
   "description": "Your codebase, decoded — AI-powered treemap visualization, inline annotation, import-based tags, and plain-English descriptions for any project",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "publisher": "godinez-llc",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -222,6 +222,6 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
-    "@vscode/vsce": "^3.2.0"
+    "@vscode/vsce": "^3.7.1"
   }
 }
