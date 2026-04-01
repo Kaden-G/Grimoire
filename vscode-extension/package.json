@@ -2,7 +2,7 @@
   "name": "grimoire",
   "displayName": "Grimoire",
   "description": "Your codebase, decoded — AI-powered treemap visualization, inline annotation, import-based tags, and plain-English descriptions for any project",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "godinez-llc",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -163,7 +163,9 @@
         "grim.exclude": {
           "type": "array",
           "default": [],
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Additional directories to exclude from scanning"
         },
         "grim.scanHeaders": {
@@ -179,7 +181,11 @@
         "grim.commentStrategy": {
           "type": "string",
           "default": "replace",
-          "enum": ["replace", "merge", "ask"],
+          "enum": [
+            "replace",
+            "merge",
+            "ask"
+          ],
           "enumDescriptions": [
             "Replace existing Grimoire comments when re-annotating (recommended)",
             "Keep existing Grimoire comments and add new ones alongside",
@@ -190,7 +196,12 @@
         "grim.defaultAnnotationMode": {
           "type": "string",
           "default": "tutor",
-          "enum": ["tutor", "minimal", "technical", "non-technical"],
+          "enum": [
+            "tutor",
+            "minimal",
+            "technical",
+            "non-technical"
+          ],
           "enumDescriptions": [
             "Teaching mode — explains WHY, names patterns, builds understanding",
             "Just the essentials — one-line signpost comments",

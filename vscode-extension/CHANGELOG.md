@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — 2026-04-01
+
+### CI/CD
+- add auto-versioning, changelog generation, and conventional commit enforcement (ce8d482)
+
 ## 0.2.1 — Marketplace Launch
 
 - Optimized keywords and metadata for VS Code Marketplace discoverability
