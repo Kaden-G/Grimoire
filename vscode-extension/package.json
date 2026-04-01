@@ -202,7 +202,15 @@
       }
     }
   },
+  "scripts": {
+    "test": "node src/__tests__/commentTagger.test.js",
+    "lint": "node -c src/extension.js && node -c src/annotator.js && node -c src/commentTagger.js && node -c src/scanner.js && node -c src/treeProvider.js && node -c src/webviewPanel.js && node -c src/welcomePanel.js",
+    "package": "vsce package --no-dependencies",
+    "package:pre": "npm run lint && npm run test",
+    "publish": "vsce publish --no-dependencies"
+  },
   "devDependencies": {
-    "@types/vscode": "^1.80.0"
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^3.2.0"
   }
 }

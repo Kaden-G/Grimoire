@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────
+# Grimoire Dev Build — Builds .vsix on merge to dev
+#
+# After tests pass, packages the extension as a downloadable
+# .vsix artifact from the GitHub Actions run. You install this
+# locally in VS Code to user-test before promoting to master.
+#
+# Flow: feature/* → PR to dev → CI passes → merge → this runs
+#       → download .vsix from Actions → install in VS Code → test
+# ─────────────────────────────────────────────────────────────
+name: Dev Build
+
+on:
+  push:
+    branches: [dev]
+
+defaults:
+  run:
+    working-directory: vscode-extension
+
+jobs:
+  build-vsix:
+    name: Build .vsix
+    runs-on: ubuntu-latest
+    # Only runs after CI workflow would also pass (same checks here as safety net)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Syntax check
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Package extension
+        run: vsce package --no-dependencies --out grimoire-dev.vsix
+
+      # Upload the .vsix as a downloadable artifact.
+      # Go to Actions → Dev Build → latest run → Artifacts → download.
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grimoire-dev-vsix
+          path: vscode-extension/grimoire-dev.vsix
+          retention-days: 30

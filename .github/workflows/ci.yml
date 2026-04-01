@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────
+# Grimoire CI — Runs on every PR and push to dev/master
+#
+# Gates: syntax check (lint) + test suite must pass.
+# This is the minimum bar for ANY code to land anywhere.
+# ─────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev, master]
+
+defaults:
+  run:
+    working-directory: vscode-extension
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No npm install needed — tests and lint use only Node builtins.
+      # This keeps CI fast (~5s) and avoids dependency resolution issues.
+
+      - name: Syntax check (lint)
+        run: npm run lint
+
+      - name: Run test suite
+        run: npm run test

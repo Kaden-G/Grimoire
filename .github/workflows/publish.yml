@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────
+# Grimoire Publish — Manual trigger to publish to VS Code Marketplace
+#
+# This workflow is intentionally manual (workflow_dispatch) so you
+# never accidentally publish. The flow:
+#
+#   1. dev is tested and stable
+#   2. PR from dev → master (CI must pass)
+#   3. Merge the PR
+#   4. Go to Actions → "Publish to Marketplace" → Run workflow
+#   5. Extension is published
+#
+# Prerequisites:
+#   - Add your VS Code Marketplace PAT as a repository secret:
+#     Settings → Secrets → Actions → New secret
+#     Name: VSCE_PAT
+#     Value: your Personal Access Token from https://dev.azure.com
+#
+# Security note: The PAT is never logged or exposed. It's injected
+# as an environment variable only during the publish step.
+# OWASP reference: Secrets Management (ASVS 2.10)
+# ─────────────────────────────────────────────────────────────
+name: Publish to Marketplace
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (package only, do not publish)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+defaults:
+  run:
+    working-directory: vscode-extension
+
+jobs:
+  publish:
+    name: Publish Extension
+    runs-on: ubuntu-latest
+    # Only allow publishing from master — this is the production gate
+    if: github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Syntax check
+        run: npm run lint
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Package extension
+        run: vsce package --no-dependencies
+
+      # Upload the production .vsix as an artifact regardless of publish
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grimoire-release-vsix
+          path: vscode-extension/*.vsix
+          retention-days: 90
+
+      - name: Publish to Marketplace
+        if: inputs.dry_run == 'false'
+        run: vsce publish --no-dependencies
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Dry run summary
+        if: inputs.dry_run == 'true'
+        run: echo "Dry run complete — .vsix built but NOT published. Download from artifacts."
