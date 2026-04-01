@@ -56,7 +56,38 @@ When `dev` is stable and tested:
 4. Go to **Actions → "Publish to Marketplace" → Run workflow**
 5. Choose dry run = `true` first to verify, then `false` to publish
 
-### Quick reference
+### Conventional Commits
+
+All commits must follow the [conventional commits](https://www.conventionalcommits.org/) format. CI will reject PRs with non-conforming commits.
+
+```
+type(scope): description
+```
+
+| Type | Bump | When to use |
+|------|------|------------|
+| `feat` | minor | New user-facing feature |
+| `fix` | patch | Bug fix |
+| `perf` | patch | Performance improvement |
+| `refactor` | patch | Code restructure, no behavior change |
+| `docs` | patch | Documentation only |
+| `test` | patch | Adding or updating tests |
+| `chore` | patch | Maintenance, deps, build |
+| `ci` | patch | CI/CD changes |
+
+For breaking changes, add `!` after the type: `feat!: redesign comment system`
+
+Examples:
+```bash
+git commit -m "feat(tagger): add Kenaz rune comment detection"
+git commit -m "fix(annotator): handle empty files in bulk mode"
+git commit -m "chore: update vsce dependency"
+git commit -m "feat!: replace comment format (breaks existing tags)"
+```
+
+The version is bumped automatically based on the highest-priority commit type since the last release. `feat` → minor, everything else → patch, breaking → major.
+
+## Quick reference
 
 ```bash
 # Run tests locally

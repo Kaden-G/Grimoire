@@ -1,9 +1,13 @@
 # ─────────────────────────────────────────────────────────────
-# Grimoire Dev Build — Builds .vsix on merge to dev
+# Grimoire Dev Build — Version bump + changelog + .vsix on merge to dev
 #
-# After tests pass, packages the extension as a downloadable
-# .vsix artifact from the GitHub Actions run. You install this
-# locally in VS Code to user-test before promoting to master.
+# After CI passes and a PR merges to dev, this workflow:
+#   1. Runs tests (safety net)
+#   2. Auto-bumps version based on conventional commits
+#   3. Generates CHANGELOG.md entry from commit messages
+#   4. Updates README.md "What's New" section for user-facing changes
+#   5. Commits version + changelog changes back to dev
+#   6. Packages .vsix as downloadable artifact
 #
 # Flow: feature/* → PR to dev → CI passes → merge → this runs
 #       → download .vsix from Actions → install in VS Code → test
@@ -14,19 +18,22 @@ on:
   push:
     branches: [dev]
 
-defaults:
-  run:
-    working-directory: vscode-extension
-
 jobs:
   build-vsix:
-    name: Build .vsix
+    name: Version Bump + Build
     runs-on: ubuntu-latest
-    # Only runs after CI workflow would also pass (same checks here as safety net)
+    # Skip if the push was from the bot (avoid infinite loop from version commit)
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    permissions:
+      contents: write  # Needed to push version bump commit
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for version bump + changelog
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -37,19 +44,47 @@ jobs:
         run: npm install -g @vscode/vsce
 
       - name: Syntax check
+        working-directory: vscode-extension
         run: npm run lint
 
       - name: Run tests
+        working-directory: vscode-extension
         run: npm run test
 
+      # ─── Version Bump ───
+      - name: Bump version from conventional commits
+        id: bump
+        run: node scripts/version-bump.js
+
+      # ─── Changelog ───
+      - name: Generate changelog + update README
+        run: node scripts/generate-changelog.js
+
+      # ─── Commit version + changelog back to dev ───
+      - name: Commit version bump and changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vscode-extension/package.json vscode-extension/CHANGELOG.md vscode-extension/README.md
+          git diff --staged --quiet || git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }} and update changelog [skip ci]"
+          git push
+
+      # ─── Package ───
       - name: Package extension
+        working-directory: vscode-extension
         run: vsce package --no-dependencies --out grimoire-dev.vsix
 
-      # Upload the .vsix as a downloadable artifact.
-      # Go to Actions → Dev Build → latest run → Artifacts → download.
       - name: Upload .vsix artifact
         uses: actions/upload-artifact@v4
         with:
           name: grimoire-dev-vsix
           path: vscode-extension/grimoire-dev.vsix
           retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "### Dev Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.bump.outputs.old_version }} → ${{ steps.bump.outputs.new_version }} (${{ steps.bump.outputs.bump_type }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Artifact**: Download \`grimoire-dev.vsix\` from the Artifacts section below" >> $GITHUB_STEP_SUMMARY
+          echo "- **Install locally**: \`code --install-extension grimoire-dev.vsix --force\`" >> $GITHUB_STEP_SUMMARY
