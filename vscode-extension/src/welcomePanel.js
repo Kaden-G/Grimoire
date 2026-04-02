@@ -369,7 +369,7 @@ class WelcomePanel {
     </div>
 
     <button class="btn-ghost" onclick="skipSetup()" style="display:block; margin:0 auto">
-      Skip for now (heuristic descriptions only, no AI)
+      Skip for now — I'll add my key later
     </button>
   </div>
 
@@ -458,18 +458,11 @@ class WelcomePanel {
     <p>Your API key is saved and verified. Grimoire is ready to map your codebase.</p>
 
     <div class="next-steps">
-      <div class="next-step" onclick="startScan()">
-        <div class="step-num">1</div>
+      <div class="next-step" onclick="startAIScan()" style="cursor:pointer">
+        <div class="step-num">\u2728</div>
         <div class="step-text">
-          <div class="step-title">\uD83D\uDDFA\uFE0F Quick Scan (no AI)</div>
-          <div class="step-desc">Map your project in seconds using smart heuristics. Free, instant, no API calls.</div>
-        </div>
-      </div>
-      <div class="next-step" onclick="startAIScan()">
-        <div class="step-num">2</div>
-        <div class="step-text">
-          <div class="step-title">\u2728 AI Scan (recommended)</div>
-          <div class="step-desc">Get Claude-powered descriptions for every file. Takes ~30 seconds for most projects.</div>
+          <div class="step-title">Scan My Project</div>
+          <div class="step-desc">Grimoire will map your codebase and generate AI-powered descriptions for every file and folder. Takes ~30 seconds for most projects.</div>
         </div>
       </div>
     </div>

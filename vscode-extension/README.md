@@ -8,6 +8,10 @@ Built for **vibe coders**, non-technical teammates, and anyone who inherits a co
 
 ---
 
+### What's New in 0.5.0
+
+- unify scan commands, replace treemap with grid layout, add inline strip option
+
 ## Features
 
 ### Interactive Treemap
@@ -25,6 +29,17 @@ Add AI-generated inline comments to any file — or your entire workspace at onc
 | **Minimal** | Quick orientation | 5-10 word signposts only |
 | **Technical** | Code review / senior devs | Precise terminology, edge cases |
 | **Non-Technical** | PMs, designers, vibe coders | Real-world analogies, zero jargon |
+
+### Comment Management (ᚲ Kenaz System)
+Grimoire tags every comment it generates with the ᚲ (Kenaz) rune — the Elder Futhark symbol for "torch" — so it can always tell its comments apart from yours. This enables three powerful strategies:
+
+| Strategy | What it does |
+|----------|-------------|
+| **Replace** (default) | Switching modes? New comments replace old Grimoire comments automatically. Your original comments are never touched. |
+| **Merge** | Keep existing Grimoire comments and add new ones alongside. |
+| **Erase All** | Strip every Grimoire comment from your workspace and delete `.grimoire.json`. Full clean slate. |
+
+Configure the default behavior in settings with `grim.commentStrategy`, or set it to `ask` to choose each time.
 
 ### Smart Import Tags
 Files are automatically tagged based on their imports — `api`, `auth`, `database`, `ai`, `state`, `routing`, and 80+ more patterns. Tags are color-coded in the treemap.
@@ -63,6 +78,7 @@ For AI-powered descriptions, add your Anthropic API key:
 | **Grimoire: Annotate Current File** | Add AI comments to the open file (pick a mode) |
 | **Grimoire: Annotate Entire Workspace** | Add AI comments to all source files (with git safety checks) |
 | **Grimoire: Search by Tag** | Filter files by import-based tags |
+| **Grimoire: Erase All Comments** | Remove all ᚲ Grimoire comments and delete `.grimoire.json` |
 | **Grimoire: Setup / API Key** | Configure your API key or join the Pro waitlist |
 
 ---
@@ -77,6 +93,7 @@ For AI-powered descriptions, add your Anthropic API key:
 | `grim.exclude` | `[]` | Additional directories to exclude |
 | `grim.scanHeaders` | `true` | Read file headers for better context |
 | `grim.plainEnglish` | `true` | Use plain English descriptions (no jargon) |
+| `grim.commentStrategy` | `replace` | How to handle existing ᚲ comments: `replace`, `merge`, or `ask` |
 | `grim.defaultAnnotationMode` | `tutor` | Default annotation mode |
 
 ---

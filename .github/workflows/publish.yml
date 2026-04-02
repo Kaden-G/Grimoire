@@ -1,0 +1,118 @@
+# ─────────────────────────────────────────────────────────────
+# Grimoire Publish — Manual trigger to publish to VS Code Marketplace
+#
+# This workflow is intentionally manual (workflow_dispatch) so you
+# never accidentally publish. The flow:
+#
+#   1. dev is tested and stable (version already bumped by dev-build)
+#   2. PR from dev → master (CI must pass)
+#   3. Merge the PR
+#   4. Go to Actions → "Publish to Marketplace" → Run workflow
+#   5. Extension is published with the version from package.json
+#
+# The version is already set by the dev-build workflow, so this
+# workflow does NOT bump the version again. It tags the release
+# and publishes.
+#
+# Prerequisites:
+#   - VSCE_PAT secret: Settings → Secrets → Actions
+#     Value: Personal Access Token from https://dev.azure.com
+#
+# Security: PAT is never logged. Injected as env var only during publish.
+# OWASP reference: Secrets Management (ASVS 2.10)
+# ─────────────────────────────────────────────────────────────
+name: Publish to Marketplace
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (package only, do not publish)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  publish:
+    name: Publish Extension
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
+
+    permissions:
+      contents: write  # Needed to create git tag
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Syntax check
+        working-directory: vscode-extension
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: vscode-extension
+        run: npm run test
+
+      # ─── Read version (already set by dev-build workflow) ───
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(node -e "console.log(require('./vscode-extension/package.json').version)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      # ─── Package ───
+      - name: Package extension
+        working-directory: vscode-extension
+        run: vsce package --no-dependencies
+
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grimoire-release-v${{ steps.version.outputs.version }}
+          path: vscode-extension/*.vsix
+          retention-days: 90
+
+      # ─── Tag the release ───
+      - name: Create git tag
+        if: inputs.dry_run == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      # ─── Publish ───
+      - name: Publish to Marketplace
+        if: inputs.dry_run == 'false'
+        working-directory: vscode-extension
+        run: vsce publish --no-dependencies
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      # ─── Summary ───
+      - name: Summary
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "### Dry Run Complete" >> $GITHUB_STEP_SUMMARY
+            echo "Version ${{ steps.version.outputs.version }} packaged but **NOT published**." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Published v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Tag**: v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Marketplace**: [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=godinez-llc.grimoire)" >> $GITHUB_STEP_SUMMARY
+          fi

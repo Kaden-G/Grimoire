@@ -6,6 +6,14 @@
  */
 
 const vscode = require('vscode');
+const {
+  GRIMOIRE_RUNE,
+  hasGrimoireComments,
+  detectModes,
+  stripGrimoireComments,
+  stripGrimoireCommentsByMode,
+  countGrimoireComments,
+} = require('./commentTagger');
 
 // ─── Annotation Mode Definitions ───
 
@@ -47,7 +55,13 @@ RULES:
 - Do NOT wrap the output in markdown code fences
 - Do NOT add a preamble or explanation outside the code
 - Preserve ALL original formatting, indentation, and whitespace exactly
-- Keep existing comments intact; add yours as new lines
+- Keep existing comments intact (including any comments marked with ᚲ from previous runs); add yours as new lines
+- CRITICAL: Every comment you add MUST begin with the marker "ᚲ [tutor]" immediately after the comment syntax.
+  Examples:
+    // ᚲ [tutor] This is the Observer pattern — it lets other parts react when this value changes
+    # ᚲ [tutor] This loop processes each item in the queue one by one
+    /* ᚲ [tutor] Entry point for the authentication flow */
+  The ᚲ marker MUST appear on every single comment you generate, no exceptions.
 
 COMMENTING STYLE — "Tutor":
 - Explain the PURPOSE and REASONING behind each section, not just what it does
@@ -73,7 +87,13 @@ RULES:
 - Do NOT wrap the output in markdown code fences
 - Do NOT add a preamble or explanation outside the code
 - Preserve ALL original formatting, indentation, and whitespace exactly
-- Keep existing comments intact; add yours as new lines
+- Keep existing comments intact (including any comments marked with ᚲ from previous runs); add yours as new lines
+- CRITICAL: Every comment you add MUST begin with the marker "ᚲ [minimal]" immediately after the comment syntax.
+  Examples:
+    // ᚲ [minimal] Auth guard
+    # ᚲ [minimal] Process queue items
+    /* ᚲ [minimal] Entry point */
+  The ᚲ marker MUST appear on every single comment you generate, no exceptions.
 
 COMMENTING STYLE — "Minimal":
 - One short line per logical section (5-10 words max per comment)
@@ -96,7 +116,13 @@ RULES:
 - Do NOT wrap the output in markdown code fences
 - Do NOT add a preamble or explanation outside the code
 - Preserve ALL original formatting, indentation, and whitespace exactly
-- Keep existing comments intact; add yours as new lines
+- Keep existing comments intact (including any comments marked with ᚲ from previous runs); add yours as new lines
+- CRITICAL: Every comment you add MUST begin with the marker "ᚲ [technical]" immediately after the comment syntax.
+  Examples:
+    // ᚲ [technical] O(n log n) sort via merge sort — stable, suitable for linked structures
+    # ᚲ [technical] SHA-256 hash per RFC 6234; timing-safe comparison prevents oracle attacks
+    /* ᚲ [technical] Thread-safe singleton via double-checked locking (JSR-133 compliant) */
+  The ᚲ marker MUST appear on every single comment you generate, no exceptions.
 
 COMMENTING STYLE — "Technical":
 - Use precise technical terminology (name patterns, algorithms, data structures)
@@ -122,7 +148,13 @@ RULES:
 - Do NOT wrap the output in markdown code fences
 - Do NOT add a preamble or explanation outside the code
 - Preserve ALL original formatting, indentation, and whitespace exactly
-- Keep existing comments intact; add yours as new lines
+- Keep existing comments intact (including any comments marked with ᚲ from previous runs); add yours as new lines
+- CRITICAL: Every comment you add MUST begin with the marker "ᚲ [non-technical]" immediately after the comment syntax.
+  Examples:
+    // ᚲ [non-technical] This checks if the person is who they say they are, like showing ID at a door
+    # ᚲ [non-technical] This saves the information so it's still there when you come back later
+    /* ᚲ [non-technical] This is the starting point — like opening the front door of the app */
+  The ᚲ marker MUST appear on every single comment you generate, no exceptions.
 
 COMMENTING STYLE — "Non-Technical":
 - Write as if explaining to someone who has NEVER programmed before
@@ -202,7 +234,7 @@ async function annotateFile(apiKey, model) {
     );
   }
 
-  // Show mode picker
+  // Show mode picker — includes annotation modes + erase option
   const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
     label: mode.label,
     description: mode.description,
@@ -210,17 +242,100 @@ async function annotateFile(apiKey, model) {
     _key: key,
   }));
 
+  // Add separator + erase option so it's discoverable alongside modes
+  const existingCount = countGrimoireComments(code);
+  if (existingCount > 0) {
+    modeItems.push({
+      label: '$(trash) Strip All Grimoire Comments',
+      description: `Remove all ${existingCount} ᚲ comments from this file`,
+      detail: 'Removes every Grimoire-generated comment. Your code and non-Grimoire comments are preserved.',
+      _key: '_erase',
+    });
+  }
+
   const selected = await vscode.window.showQuickPick(modeItems, {
-    placeHolder: 'Choose annotation style',
+    placeHolder: existingCount > 0
+      ? `Choose annotation style (${existingCount} ᚲ comments detected)`
+      : 'Choose annotation style',
     title: `Annotate: ${fileName}`,
   });
 
   if (!selected) return;
 
+  // Handle erase: strip all ᚲ comments from this single file and return early
+  if (selected._key === '_erase') {
+    const { stripped, count } = stripGrimoireComments(code);
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(code.length)
+    );
+    edit.replace(document.uri, fullRange, stripped);
+    await vscode.workspace.applyEdit(edit);
+    vscode.window.showInformationMessage(
+      `Grimoire: Stripped ${count} ᚲ comments from ${fileName}. Clean slate.`
+    );
+    return;
+  }
+
   const mode = ANNOTATION_MODES[selected._key];
 
+  // ─── Comment Strategy: Replace vs Merge ───
+  // If the file already has Grimoire comments, determine how to handle them.
+  // Default behavior: Replace (strip existing ᚲ comments before re-annotating).
+  // The user's setting can override this, or they can choose interactively.
+  let codeToAnnotate = code;
+  const existingModes = detectModes(code);
+
+  if (existingModes.length > 0) {
+    const config = vscode.workspace.getConfiguration('grim');
+    const strategy = config.get('commentStrategy', 'replace');
+
+    if (strategy === 'ask') {
+      // Interactive: let the user decide each time
+      const existingLabel = existingModes.join(', ');
+      const commentCount = countGrimoireComments(code);
+      const strategyPick = await vscode.window.showQuickPick(
+        [
+          {
+            label: '$(replace) Replace',
+            description: `Remove ${commentCount} existing ᚲ [${existingLabel}] comments, then annotate fresh`,
+            _strategy: 'replace',
+          },
+          {
+            label: '$(add) Merge',
+            description: `Keep existing ᚲ comments and add new [${selected._key}] comments alongside`,
+            _strategy: 'merge',
+          },
+          {
+            label: '$(close) Cancel',
+            description: 'Do nothing',
+            _strategy: 'cancel',
+          },
+        ],
+        {
+          placeHolder: `This file has ${commentCount} Grimoire [${existingLabel}] comments. Replace or merge?`,
+          title: 'Comment Strategy',
+        }
+      );
+
+      if (!strategyPick || strategyPick._strategy === 'cancel') return;
+
+      if (strategyPick._strategy === 'replace') {
+        const { stripped } = stripGrimoireComments(code);
+        codeToAnnotate = stripped;
+      }
+      // 'merge' → codeToAnnotate stays as original code (comments preserved)
+    } else if (strategy === 'replace') {
+      // Default: silently replace
+      const { stripped } = stripGrimoireComments(code);
+      codeToAnnotate = stripped;
+    }
+    // 'merge' strategy → codeToAnnotate stays as original code
+  }
+
   // Build the prompt
-  const prompt = mode.prompt(code, fileName, language);
+  const prompt = mode.prompt(codeToAnnotate, fileName, language);
 
   // Call the API with progress
   let annotatedCode;
@@ -419,7 +534,7 @@ async function annotateWorkspace(apiKey, model) {
     if (proceed !== 'Annotate Anyway') return;
   }
 
-  // ─── Mode selection ───
+  // ─── Mode selection (includes strip option for workspace-wide erase) ───
   const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
     label: mode.label,
     description: mode.description,
@@ -427,11 +542,25 @@ async function annotateWorkspace(apiKey, model) {
     _key: key,
   }));
 
+  // Add strip option so mass removal is discoverable alongside annotation modes
+  modeItems.push({
+    label: '$(trash) Strip All Grimoire Comments',
+    description: 'Remove all ᚲ comments from every file in this workspace',
+    detail: 'Walks the workspace, strips every Grimoire-generated comment, and deletes .grimoire.json. Your code is preserved.',
+    _key: '_erase_all',
+  });
+
   const selected = await vscode.window.showQuickPick(modeItems, {
     placeHolder: 'Choose annotation style for all files',
     title: 'Bulk Annotate Workspace',
   });
   if (!selected) return;
+
+  // Handle workspace-wide erase: delegate to eraseAllComments and return early
+  if (selected._key === '_erase_all') {
+    await eraseAllComments();
+    return;
+  }
 
   const mode = ANNOTATION_MODES[selected._key];
 
@@ -509,7 +638,18 @@ async function annotateWorkspace(apiKey, model) {
         });
 
         try {
-          const code = fs.readFileSync(filePath, 'utf8');
+          let code = fs.readFileSync(filePath, 'utf8');
+
+          // ─── Apply comment strategy for bulk annotation ───
+          // In bulk mode, we always use the configured strategy (no interactive prompt).
+          // Default: replace — strip existing ᚲ comments before re-annotating.
+          const bulkConfig = vscode.workspace.getConfiguration('grim');
+          const bulkStrategy = bulkConfig.get('commentStrategy', 'replace');
+          if (bulkStrategy === 'replace' && hasGrimoireComments(code)) {
+            const { stripped } = stripGrimoireComments(code);
+            code = stripped;
+          }
+          // 'merge' or 'ask' in bulk mode → treat as merge (no interactive prompt in bulk)
 
           // Detect language from extension
           const ext = path.extname(fileName).toLowerCase();
@@ -569,4 +709,136 @@ async function annotateWorkspace(apiKey, model) {
   }
 }
 
-module.exports = { annotateFile, annotateWorkspace, ANNOTATION_MODES };
+// ─── Erase All Grimoire Comments ───
+
+/**
+ * Strips all ᚲ-tagged comments from every source file in the workspace
+ * and deletes .grimoire.json. Full clean slate — as if Grimoire was never run.
+ *
+ * Design decision: Full reset rather than "comments only" erase.
+ * Why: If the user has edited code since annotation, .grimoire.json line mappings
+ * are stale and the comments themselves may reference outdated logic. Preserving
+ * metadata gives false confidence. Better to force a fresh scan when they're ready.
+ */
+async function eraseAllComments() {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders || !workspaceFolders.length) {
+    vscode.window.showWarningMessage('Grimoire: No workspace folder open.');
+    return;
+  }
+
+  const workspacePath = workspaceFolders[0].uri.fsPath;
+  const fs = require('fs');
+  const path = require('path');
+
+  // ─── Scan for files with Grimoire comments ───
+  const config = vscode.workspace.getConfiguration('grim');
+  const excludeDirs = new Set([
+    'node_modules', '.git', '.svn', 'dist', 'build', 'out', '.next', '__pycache__',
+    'venv', '.venv', 'env', '.env', 'vendor', 'target', 'coverage',
+    '.grimoire', ...(config.get('exclude', []) || []),
+  ]);
+
+  const filesToClean = [];
+
+  // Walk the workspace to find files with ᚲ comments
+  function walkDir(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!excludeDirs.has(entry.name)) walkDir(fullPath);
+      } else {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (ANNOTATABLE_EXTENSIONS.has(ext)) {
+          try {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            if (hasGrimoireComments(content)) {
+              filesToClean.push(fullPath);
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+  walkDir(workspacePath);
+
+  // Check for .grimoire.json
+  const grimoireJsonPath = path.join(workspacePath, '.grimoire.json');
+  const hasGrimoireJson = fs.existsSync(grimoireJsonPath);
+
+  if (filesToClean.length === 0 && !hasGrimoireJson) {
+    vscode.window.showInformationMessage('Grimoire: No ᚲ comments or .grimoire.json found. Nothing to erase.');
+    return;
+  }
+
+  // ─── Confirm with user ───
+  const parts = [];
+  if (filesToClean.length > 0) parts.push(`${filesToClean.length} files with ᚲ comments`);
+  if (hasGrimoireJson) parts.push('.grimoire.json');
+
+  const confirm = await vscode.window.showWarningMessage(
+    `Grimoire: Erase all? This will clean ${parts.join(' and ')}. This cannot be undone (unless you have git).`,
+    { modal: true },
+    'Erase Everything',
+    'Cancel'
+  );
+
+  if (confirm !== 'Erase Everything') {
+    vscode.window.showInformationMessage('Grimoire: Erase cancelled.');
+    return;
+  }
+
+  // ─── Strip comments from all files ───
+  let cleaned = 0;
+  let totalRemoved = 0;
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'Grimoire: Erasing comments...',
+      cancellable: false,
+    },
+    async (progress) => {
+      for (let i = 0; i < filesToClean.length; i++) {
+        const filePath = filesToClean[i];
+        const relPath = path.relative(workspacePath, filePath);
+        progress.report({
+          increment: (1 / filesToClean.length) * 90,
+          message: `(${i + 1}/${filesToClean.length}) ${relPath}`,
+        });
+
+        try {
+          const content = fs.readFileSync(filePath, 'utf8');
+          const { stripped, count } = stripGrimoireComments(content);
+          fs.writeFileSync(filePath, stripped, 'utf8');
+          cleaned++;
+          totalRemoved += count;
+        } catch (err) {
+          console.warn(`Grimoire: Failed to clean ${relPath}: ${err.message}`);
+        }
+      }
+
+      // Delete .grimoire.json
+      if (hasGrimoireJson) {
+        try {
+          fs.unlinkSync(grimoireJsonPath);
+          progress.report({ increment: 10, message: 'Deleted .grimoire.json' });
+        } catch (err) {
+          console.warn(`Grimoire: Failed to delete .grimoire.json: ${err.message}`);
+        }
+      }
+    }
+  );
+
+  // ─── Summary ───
+  let summary = `Grimoire: Erased ${totalRemoved} comments from ${cleaned} files.`;
+  if (hasGrimoireJson) summary += ' Deleted .grimoire.json.';
+  summary += ' Clean slate.';
+
+  vscode.window.showInformationMessage(summary, 'OK');
+}
+
+module.exports = { annotateFile, annotateWorkspace, eraseAllComments, ANNOTATION_MODES };

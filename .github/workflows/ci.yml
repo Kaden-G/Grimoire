@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────
+# Grimoire CI — Runs on every PR and push to dev/master
+#
+# Gates:
+#   1. Conventional commit format validation (PRs only)
+#   2. Syntax check (lint)
+#   3. Test suite
+#
+# This is the minimum bar for ANY code to land anywhere.
+# ─────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev, master]
+
+jobs:
+  validate-commits:
+    name: Validate Commits
+    runs-on: ubuntu-latest
+    # Only enforce conventional commits on PRs, not direct pushes
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed to compare with base branch
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate conventional commit format
+        run: node scripts/validate-commits.js --base ${{ github.base_ref }}
+
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: vscode-extension
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No npm install needed — tests and lint use only Node builtins.
+      # This keeps CI fast (~5s) and avoids dependency resolution issues.
+
+      - name: Syntax check (lint)
+        run: npm run lint
+
+      - name: Run test suite
+        run: npm run test

@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.5.0 — 2026-04-02
+
+### Features
+- unify scan commands, replace treemap with grid layout, add inline strip option (17a1630)
+
+### Documentation
+- update 0.3.1 changelog with restored features and UX improvements (4a761e7)
+
+### CI/CD
+- add auto-versioning, changelog generation, and conventional commit enforcement (ce8d482)
+
+### Maintenance
+- bump version to 0.4.0 and update changelog [skip ci] (cb9681f)
+- bump version to 0.3.1 and update changelog [skip ci] (c9ab905)
+- bump to v0.2.0, optimize vsix packaging, update changelog (9378883)
+- bump version to 0.1.1 and update changelog [skip ci] (7714ddc)
+
+## 0.4.0 — 2026-04-02
+
+### Features
+- unify scan commands, replace treemap with grid layout, add inline strip option (17a1630)
+
+### CI/CD
+- add auto-versioning, changelog generation, and conventional commit enforcement (ce8d482)
+
+### Maintenance
+- bump version to 0.3.1 and update changelog [skip ci] (c9ab905)
+- bump to v0.2.0, optimize vsix packaging, update changelog (9378883)
+- bump version to 0.1.1 and update changelog [skip ci] (7714ddc)
+
+## 0.3.1 — 2026-04-01
+
+### Features
+- Restored treemap spatial layout for the interactive repo map
+- Separated Quick Scan (heuristic) from AI Scan into distinct commands
+- Added inline "Strip All Grimoire Comments" option to both single-file and bulk annotation dropdowns
+- Updated welcome panel with two-step scan flow (Quick Scan vs AI Scan)
+
+### Maintenance
+- Unified uncommitted marketplace changes with dev branch
+- Auto-version bump via conventional commits pipeline
+
+## 0.3.0 — 2026-04-01
+
+### Features
+- Comment management system with ᚲ (Kenaz) rune tagging
+- Replace, Merge, and Erase All comment strategies
+- New `grim.eraseComments` command for full clean slate
+- New `grim.commentStrategy` setting (replace/merge/ask)
+
+### CI/CD
+- Conventional commit enforcement on PRs
+- Auto version bumping from commit prefixes
+- Auto changelog generation
+- Dev build workflow with .vsix artifact
+- Manual publish workflow with dry-run option
+- Optimized .vsix packaging (764KB → 78KB)
+
 ## 0.2.1 — Marketplace Launch
 
 - Optimized keywords and metadata for VS Code Marketplace discoverability

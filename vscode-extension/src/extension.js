@@ -10,7 +10,7 @@ const path = require('path');
 const { scanWorkspace, applyDescriptions, collectPaths } = require('./scanner');
 const { GrimoireTreeProvider } = require('./treeProvider');
 const { GrimoirePanel } = require('./webviewPanel');
-const { annotateFile, annotateWorkspace } = require('./annotator');
+const { annotateFile, annotateWorkspace, eraseAllComments } = require('./annotator');
 const { WelcomePanel } = require('./welcomePanel');
 
 let treeProvider;
@@ -45,73 +45,22 @@ function activate(context) {
     }, 1500);
   }
 
-  // ─── Command: Scan Workspace (heuristics only) ───
+  // ─── Command: Scan Workspace (auto-includes AI descriptions when API key is available) ───
   context.subscriptions.push(
     vscode.commands.registerCommand('grim.scan', async () => {
-      const workspacePath = getWorkspacePath();
-      if (!workspacePath) return;
-
-      await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Grimoire: Scanning workspace...',
-          cancellable: true,
-        },
-        async (progress, token) => {
-          progress.report({ increment: 0, message: 'Walking directory tree...' });
-
-          const result = await scanWorkspace(workspacePath, {}, token);
-          if (!result) {
-            vscode.window.showWarningMessage('Grimoire: Scan was cancelled.');
-            return;
-          }
-
-          lastScanResult = result;
-
-          progress.report({ increment: 70, message: 'Building map...' });
-
-          // Update sidebar tree
-          treeProvider.setData(result.output.tree, workspacePath, result.snippets);
-
-          // Save .grimoire.json
-          const outputPath = path.join(workspacePath, '.grimoire.json');
-          fs.writeFileSync(outputPath, JSON.stringify(result.output, null, 2));
-
-          progress.report({ increment: 100, message: 'Done!' });
-
-          const totalPaths = result.allPaths.length;
-          const snippetCount = Object.keys(result.snippets).length;
-
-          const action = await vscode.window.showInformationMessage(
-            `Grimoire: Mapped ${totalPaths} items (${snippetCount} with code snippets). Saved .grimoire.json`,
-            'Open Map',
-            'Add to .gitignore'
-          );
-
-          if (action === 'Open Map') {
-            vscode.commands.executeCommand('grim.openMap');
-          } else if (action === 'Add to .gitignore') {
-            addToGitignore(workspacePath);
-          }
-        }
-      );
-    })
-  );
-
-  // ─── Command: Scan with AI Descriptions ───
-  context.subscriptions.push(
-    vscode.commands.registerCommand('grim.scanWithAI', async () => {
       const workspacePath = getWorkspacePath();
       if (!workspacePath) return;
 
       const config = vscode.workspace.getConfiguration('grim');
       let apiKey = config.get('anthropicApiKey') || process.env.ANTHROPIC_API_KEY;
 
+      // If no API key, prompt setup — AI descriptions are the core feature
       if (!apiKey) {
         const action = await vscode.window.showWarningMessage(
-          'Grimoire needs an API key for AI descriptions.',
+          'Grimoire uses AI to describe your codebase. Set up an API key to get started.',
           'Set Up Now',
-          'Enter Key Manually'
+          'Enter Key Manually',
+          'Scan Without AI'
         );
         if (action === 'Set Up Now') {
           WelcomePanel.createOrShow(context);
@@ -122,39 +71,97 @@ function activate(context) {
             password: true,
             placeHolder: 'sk-ant-...',
           });
+          if (!apiKey) return;
+        } else if (action !== 'Scan Without AI') {
+          return; // dismissed
         }
-        if (!apiKey) return;
+      }
+
+      const useAI = !!apiKey;
+
+      // Ask description style every time for a new scan
+      let plainEnglish = config.get('plainEnglish', true);
+      let annotationModeKey = null;
+      if (useAI) {
+        const style = await vscode.window.showQuickPick(
+          [
+            { label: '$(book) Plain English', description: 'Friendly descriptions anyone can understand', value: true },
+            { label: '$(code) Technical', description: 'Concise developer-oriented descriptions', value: false },
+          ],
+          { placeHolder: 'How should Grimoire describe your code?', title: 'Description Style' }
+        );
+        if (!style) return; // user cancelled
+        plainEnglish = style.value;
+
+        // Ask about inline comments
+        const commentStyle = await vscode.window.showQuickPick(
+          [
+            { label: '$(mortar-board) Tutor', description: 'Teaching mode — explains WHY things work', _key: 'tutor' },
+            { label: '$(dash) Minimal', description: 'Just the essentials — one-line comments per section', _key: 'minimal' },
+            { label: '$(tools) Technical', description: 'Best-practice annotations with proper terminology', _key: 'technical' },
+            { label: '$(heart) Non-Technical', description: 'Plain English — no jargon, real-world explanations', _key: 'non-technical' },
+            { label: '$(circle-slash) None', description: 'Skip inline comments for now', _key: 'none' },
+          ],
+          { placeHolder: 'Add inline comments to your files? (You can always do this later via Command Palette)', title: 'Inline Comments' }
+        );
+        if (!commentStyle) return; // user cancelled
+        if (commentStyle._key !== 'none') {
+          annotationModeKey = commentStyle._key;
+        }
       }
 
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Grimoire: Scanning with AI...',
+          title: useAI ? 'Grimoire: Scanning with AI...' : 'Grimoire: Scanning workspace...',
           cancellable: true,
         },
         async (progress, token) => {
           progress.report({ increment: 0, message: 'Walking directory tree...' });
 
           const result = await scanWorkspace(workspacePath, {}, token);
-          if (!result || token.isCancellationRequested) return;
+          if (!result || token.isCancellationRequested) {
+            vscode.window.showWarningMessage('Grimoire: Scan was cancelled.');
+            return;
+          }
 
-          progress.report({ increment: 30, message: 'Requesting AI descriptions...' });
+          // If API key is available, automatically generate AI descriptions
+          if (useAI) {
+            progress.report({ increment: 30, message: 'Generating AI descriptions...' });
 
-          // Call AI for descriptions
-          try {
-            const plainEnglish = config.get('plainEnglish', true);
-            const descs = await callClaudeAPI(
-              apiKey, result.allPaths, result.readme,
-              config.get('model', 'claude-sonnet-4-20250514'),
-              config.get('batchSize', 20),
-              result.snippets, progress, token, plainEnglish
-            );
+            try {
+              const descs = await callClaudeAPI(
+                apiKey, result.allPaths, result.readme,
+                config.get('model', 'claude-sonnet-4-20250514'),
+                config.get('batchSize', 20),
+                result.snippets, progress, token, plainEnglish
+              );
 
-            const applied = applyDescriptions(result.output.tree, descs);
-            result.output.model = config.get('model', 'claude-sonnet-4-20250514');
-            result.output.plainEnglish = plainEnglish;
+              const applied = applyDescriptions(result.output.tree, descs);
+              result.output.model = config.get('model', 'claude-sonnet-4-20250514');
+              result.output.plainEnglish = plainEnglish;
 
-            progress.report({ increment: 90, message: 'Saving...' });
+              progress.report({ increment: 90, message: 'Saving...' });
+
+              lastScanResult = result;
+              treeProvider.setData(result.output.tree, workspacePath, result.snippets);
+
+              const outputPath = path.join(workspacePath, '.grimoire.json');
+              fs.writeFileSync(outputPath, JSON.stringify(result.output, null, 2));
+
+              progress.report({ increment: 100, message: 'Done!' });
+
+              const action = await vscode.window.showInformationMessage(
+                `Grimoire: ${applied} AI descriptions applied to ${result.allPaths.length} items.`,
+                'Open Map'
+              );
+              if (action === 'Open Map') vscode.commands.executeCommand('grim.openMap');
+            } catch (err) {
+              vscode.window.showErrorMessage(`Grimoire AI Error: ${err.message}`);
+            }
+          } else {
+            // Heuristic-only fallback
+            progress.report({ increment: 70, message: 'Building map...' });
 
             lastScanResult = result;
             treeProvider.setData(result.output.tree, workspacePath, result.snippets);
@@ -162,17 +169,30 @@ function activate(context) {
             const outputPath = path.join(workspacePath, '.grimoire.json');
             fs.writeFileSync(outputPath, JSON.stringify(result.output, null, 2));
 
-            vscode.window.showInformationMessage(
-              `Grimoire: Applied ${applied} AI descriptions to ${result.allPaths.length} items.`,
-              'Open Map'
-            ).then(action => {
-              if (action === 'Open Map') vscode.commands.executeCommand('grim.openMap');
-            });
-          } catch (err) {
-            vscode.window.showErrorMessage(`Grimoire AI Error: ${err.message}`);
+            progress.report({ increment: 100, message: 'Done!' });
+
+            const action = await vscode.window.showInformationMessage(
+              `Grimoire: Mapped ${result.allPaths.length} items. Add an API key for AI descriptions!`,
+              'Open Map',
+              'Set Up API Key'
+            );
+            if (action === 'Open Map') vscode.commands.executeCommand('grim.openMap');
+            else if (action === 'Set Up API Key') WelcomePanel.createOrShow(context);
           }
         }
       );
+
+      // Run inline annotation after scan completes (outside withProgress so it gets its own progress bar)
+      if (annotationModeKey && apiKey) {
+        await annotateWorkspace(apiKey, config.get('model', 'claude-sonnet-4-20250514'), annotationModeKey);
+      }
+    })
+  );
+
+  // ─── Command: Scan with AI (alias — just calls grim.scan) ───
+  context.subscriptions.push(
+    vscode.commands.registerCommand('grim.scanWithAI', () => {
+      vscode.commands.executeCommand('grim.scan');
     })
   );
 
@@ -345,6 +365,13 @@ function activate(context) {
 
       const model = config.get('model', 'claude-sonnet-4-20250514');
       await annotateWorkspace(apiKey, model);
+    })
+  );
+
+  // ─── Command: Erase All Grimoire Comments ───
+  context.subscriptions.push(
+    vscode.commands.registerCommand('grim.eraseComments', async () => {
+      await eraseAllComments();
     })
   );
 
