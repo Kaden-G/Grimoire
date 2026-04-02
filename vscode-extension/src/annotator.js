@@ -234,7 +234,7 @@ async function annotateFile(apiKey, model) {
     );
   }
 
-  // Show mode picker
+  // Show mode picker — includes annotation modes + erase option
   const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
     label: mode.label,
     description: mode.description,
@@ -242,12 +242,41 @@ async function annotateFile(apiKey, model) {
     _key: key,
   }));
 
+  // Add separator + erase option so it's discoverable alongside modes
+  const existingCount = countGrimoireComments(code);
+  if (existingCount > 0) {
+    modeItems.push({
+      label: '$(trash) Strip All Grimoire Comments',
+      description: `Remove all ${existingCount} ᚲ comments from this file`,
+      detail: 'Removes every Grimoire-generated comment. Your code and non-Grimoire comments are preserved.',
+      _key: '_erase',
+    });
+  }
+
   const selected = await vscode.window.showQuickPick(modeItems, {
-    placeHolder: 'Choose annotation style',
+    placeHolder: existingCount > 0
+      ? `Choose annotation style (${existingCount} ᚲ comments detected)`
+      : 'Choose annotation style',
     title: `Annotate: ${fileName}`,
   });
 
   if (!selected) return;
+
+  // Handle erase: strip all ᚲ comments from this single file and return early
+  if (selected._key === '_erase') {
+    const { stripped, count } = stripGrimoireComments(code);
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(code.length)
+    );
+    edit.replace(document.uri, fullRange, stripped);
+    await vscode.workspace.applyEdit(edit);
+    vscode.window.showInformationMessage(
+      `Grimoire: Stripped ${count} ᚲ comments from ${fileName}. Clean slate.`
+    );
+    return;
+  }
 
   const mode = ANNOTATION_MODES[selected._key];
 
@@ -505,7 +534,7 @@ async function annotateWorkspace(apiKey, model) {
     if (proceed !== 'Annotate Anyway') return;
   }
 
-  // ─── Mode selection ───
+  // ─── Mode selection (includes strip option for workspace-wide erase) ───
   const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
     label: mode.label,
     description: mode.description,
@@ -513,11 +542,25 @@ async function annotateWorkspace(apiKey, model) {
     _key: key,
   }));
 
+  // Add strip option so mass removal is discoverable alongside annotation modes
+  modeItems.push({
+    label: '$(trash) Strip All Grimoire Comments',
+    description: 'Remove all ᚲ comments from every file in this workspace',
+    detail: 'Walks the workspace, strips every Grimoire-generated comment, and deletes .grimoire.json. Your code is preserved.',
+    _key: '_erase_all',
+  });
+
   const selected = await vscode.window.showQuickPick(modeItems, {
     placeHolder: 'Choose annotation style for all files',
     title: 'Bulk Annotate Workspace',
   });
   if (!selected) return;
+
+  // Handle workspace-wide erase: delegate to eraseAllComments and return early
+  if (selected._key === '_erase_all') {
+    await eraseAllComments();
+    return;
+  }
 
   const mode = ANNOTATION_MODES[selected._key];
 

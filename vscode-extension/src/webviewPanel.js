@@ -122,8 +122,8 @@ class GrimoirePanel {
     border-bottom: 1px solid var(--border);
     background: rgba(17,24,39,0.85); flex-shrink: 0;
   }
-  .header h1 { font-size: 16px; font-weight: 700; margin: 0; }
-  .header .stats { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .header h1 { font-size: 20px; font-weight: 700; margin: 0; }
+  .header .stats { font-size: 13px; color: var(--text-muted); margin-left: auto; }
 
   /* Breadcrumb */
   .breadcrumb {
@@ -131,13 +131,13 @@ class GrimoirePanel {
     border-bottom: 1px solid var(--border); background: rgba(17,24,39,0.5); flex-shrink: 0;
   }
   .breadcrumb-item {
-    font-size: 12px; color: var(--accent); cursor: pointer; background: none;
+    font-size: 14px; color: var(--accent); cursor: pointer; background: none;
     border: none; padding: 2px 6px; border-radius: 4px;
   }
   .breadcrumb-item:hover { background: var(--accent-dim); }
-  .breadcrumb-sep { color: var(--text-muted); font-size: 11px; }
-  .breadcrumb-current { font-size: 12px; color: var(--text); font-weight: 600; padding: 2px 6px; }
-  .breadcrumb-desc { margin-left: 12px; font-size: 11px; color: var(--ai-desc); font-style: italic; opacity: 0.8; }
+  .breadcrumb-sep { color: var(--text-muted); font-size: 13px; }
+  .breadcrumb-current { font-size: 14px; color: var(--text); font-weight: 600; padding: 2px 6px; }
+  .breadcrumb-desc { margin-left: 12px; font-size: 13px; color: var(--ai-desc); font-style: italic; opacity: 0.8; }
 
   /* Search */
   .search-wrap {
@@ -162,50 +162,60 @@ class GrimoirePanel {
   }
   .search-result:hover { background: var(--surface-hover); }
 
-  /* Treemap container */
+  /* Grid container */
   .treemap-container {
-    flex: 1; position: relative; overflow: hidden;
+    flex: 1; overflow-y: auto; overflow-x: hidden; position: relative;
     background: radial-gradient(circle at 50% 50%, #0f1520 0%, var(--bg) 100%);
+    padding: 12px 12px 60px;
   }
   .treemap-grid {
-    position: absolute; inset: 0; opacity: 0.04;
-    background-image: radial-gradient(var(--text-muted) 1px, transparent 1px);
-    background-size: 24px 24px; pointer-events: none;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .grid-section-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-muted); padding: 12px 0 4px; border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+  }
+  .dir-grid {
+    display: flex; flex-direction: column; gap: 6px;
   }
 
-  /* Dir cell */
+  /* Dir cell — full-width row like files */
   .dir-cell {
-    position: absolute; border-radius: 8px; overflow: hidden; cursor: pointer;
-    display: flex; flex-direction: column; transition: all 0.15s;
+    border-radius: 6px; overflow: hidden; cursor: pointer;
+    display: flex; flex-direction: row; align-items: flex-start; gap: 10px;
+    transition: all 0.15s; position: relative;
+    padding: 10px 14px; width: 100%;
   }
   .dir-cell:hover { box-shadow: 0 0 20px rgba(56,189,248,0.15); }
-  .dir-header {
-    display: flex; align-items: center; gap: 5px; flex-shrink: 0; overflow: hidden;
-  }
-  .dir-body { flex: 1; overflow: hidden; }
-  .dir-children { display: flex; flex-wrap: wrap; gap: 2px; overflow: hidden; }
+  .dir-info { flex: 1; min-width: 0; }
+  .dir-children { display: flex; flex-wrap: wrap; gap: 3px; overflow: hidden; margin-top: 5px; }
   .dir-chip {
-    font-size: 9px; padding: 1px 5px; border-radius: 4px; white-space: nowrap;
+    font-size: 9px; padding: 2px 6px; border-radius: 4px; white-space: nowrap;
   }
   .zoom-hint {
-    position: absolute; bottom: 4px; right: 6px; display: flex; align-items: center; gap: 3px;
-    font-size: 9px; opacity: 0; transition: 0.15s;
+    position: absolute; top: 10px; right: 10px; display: flex; align-items: center; gap: 3px;
+    font-size: 10px; opacity: 0; transition: 0.15s;
   }
   .dir-cell:hover .zoom-hint { opacity: 0.7; }
 
-  /* File cell */
+  /* File cell — full-width list row */
   .file-cell {
-    position: absolute; border-radius: 6px; overflow: hidden;
-    display: flex; flex-direction: column; transition: all 0.15s;
+    border-radius: 6px; overflow: hidden;
+    display: flex; flex-direction: row; align-items: flex-start; gap: 10px;
+    transition: all 0.15s;
     border: 1px solid var(--border);
     background: var(--surface);
+    padding: 10px 14px; position: relative; cursor: pointer;
+    width: 100%;
   }
   .file-cell:hover {
     border-color: var(--border-hover);
     background: var(--surface-hover);
   }
+  .file-cell .file-info { flex: 1; min-width: 0; }
   .file-open-hint {
-    position: absolute; top: 3px; right: 5px; font-size: 9px; color: var(--accent);
+    position: absolute; top: 8px; right: 10px; font-size: 10px; color: var(--accent);
     display: flex; align-items: center; gap: 2px; opacity: 0; transition: 0.15s;
   }
   .file-cell:hover .file-open-hint { opacity: 1; }
@@ -249,11 +259,11 @@ class GrimoirePanel {
     overflow: hidden; max-height: 80px; white-space: pre; tab-size: 2;
   }
 
-  /* Floating toolbar */
+  /* Toolbar — fixed bottom bar */
   .floating-toolbar {
-    position: absolute; bottom: 20px; left: 20px; z-index: 50;
+    position: fixed; bottom: 12px; left: 12px; z-index: 50;
     display: flex; align-items: center; gap: 2px;
-    background: rgba(17,24,39,0.92); backdrop-filter: blur(12px);
+    background: rgba(17,24,39,0.95); backdrop-filter: blur(12px);
     border: 1px solid var(--border); border-radius: 12px;
     padding: 6px 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   }
@@ -298,9 +308,9 @@ let containerW = 800;
 let containerH = 500;
 
 const TEXT_SIZES = {
-  small:  { name: 10.5, desc: 9.5,  tag: 8.5,  header: 12, cellName: 10, cellDesc: 9 },
-  medium: { name: 13,   desc: 11.5, tag: 10,   header: 15, cellName: 12, cellDesc: 10.5 },
-  large:  { name: 15.5, desc: 13.5, tag: 11.5, header: 18, cellName: 14, cellDesc: 12.5 },
+  small:  { name: 12, desc: 10, tag: 9, header: 13, cellName: 12, cellDesc: 10 },
+  medium: { name: 14, desc: 12, tag: 10.5, header: 15, cellName: 14, cellDesc: 12 },
+  large:  { name: 16, desc: 14, tag: 12, header: 18, cellName: 16, cellDesc: 14 },
 };
 
 const DIR_PALETTE = [
@@ -538,26 +548,23 @@ function render() {
   }
   html += '</div>';
 
-  // ─── Treemap ───
+  // ─── Grid ───
   html += '<div class="treemap-container" id="treemap-container">';
-  html += '<div class="treemap-grid"></div>';
 
-  // Build treemap items
+  // Build grid items
   const treemapItems = [];
   (node.children || []).forEach((c, i) => {
-    treemapItems.push({ type: 'dir', node: c, name: c.name, value: totalWeight(c), index: i });
+    treemapItems.push({ type: 'dir', node: c, name: c.name, value: 1, index: i });
   });
   (node.files || []).forEach((f, i) => {
     treemapItems.push({ type: 'file', node: f, name: f.name, value: 1, index: i });
   });
 
   if (treemapItems.length === 0) {
-    html += '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--text-muted)">This directory is empty</div>';
+    html += '<div style="display:flex; align-items:center; justify-content:center; height:200px; color:var(--text-muted)">This directory is empty</div>';
   }
 
-  // We'll render the cells in a second pass after we know the container size.
-  // For now, place a marker.
-  html += '<div id="treemap-cells"></div>';
+  html += '<div class="treemap-grid" id="treemap-cells"></div>';
 
   // Tooltip placeholder
   html += '<div id="tooltip-container"></div>';
@@ -582,29 +589,12 @@ function render() {
 
   app.innerHTML = html;
 
-  // ─── Measure container and render cells ───
-  // Use a small delay to ensure the layout has been computed
-  function measureAndRender() {
-    try {
-      const container = document.getElementById('treemap-container');
-      if (!container) { console.error('Grimoire: treemap-container not found'); return; }
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      console.log('Grimoire: container size = ' + w + 'x' + h + ', items = ' + treemapItems.length);
-      if (w > 0 && h > 0) {
-        containerW = w;
-        containerH = h;
-        renderTreemapCells(treemapItems);
-      } else {
-        // Container not laid out yet, retry
-        console.log('Grimoire: container not ready, retrying...');
-        setTimeout(measureAndRender, 50);
-      }
-    } catch(e) {
-      console.error('Grimoire render error:', e);
-    }
+  // ─── Render grid cells ───
+  try {
+    renderTreemapCells(treemapItems);
+  } catch(e) {
+    console.error('Grimoire render error:', e);
   }
-  requestAnimationFrame(measureAndRender);
 
   // Restore search focus
   if (searchQuery) {
@@ -617,123 +607,113 @@ function renderTreemapCells(items) {
   const cellsDiv = document.getElementById('treemap-cells');
   if (!cellsDiv) return;
 
-  const GAP = 3;
-  const padded = { x: GAP, y: GAP, w: containerW - GAP * 2, h: containerH - GAP * 2 };
-  if (padded.w <= 0 || padded.h <= 0) return;
-  const layout = computeTreemap(items, padded);
   const sz = TEXT_SIZES[textSize];
 
-  let html = '';
-  for (const item of layout) {
-    const L = item.layout;
-    const PAD = 2;
-    const x = L.x + PAD, y = L.y + PAD;
-    const w = Math.max(L.w - PAD * 2, 0);
-    const h = Math.max(L.h - PAD * 2, 0);
+  const dirs = items.filter(i => i.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+  const files = items.filter(i => i.type !== 'dir').sort((a, b) => a.name.localeCompare(b.name));
 
-    if (item.type === 'dir') {
-      html += renderDirCell(item, x, y, w, h, sz);
-    } else {
-      html += renderFileCell(item, x, y, w, h, sz);
+  let html = '';
+
+  // Folders section
+  if (dirs.length > 0) {
+    html += '<div class="grid-section-label mono">Folders (' + dirs.length + ')</div>';
+    html += '<div class="dir-grid">';
+    for (const item of dirs) {
+      html += renderDirCell(item, sz);
+    }
+    html += '</div>';
+  }
+
+  // Files section — one per row
+  if (files.length > 0) {
+    html += '<div class="grid-section-label mono">Files (' + files.length + ')</div>';
+    for (const item of files) {
+      html += renderFileCell(item, sz);
     }
   }
+
   cellsDiv.innerHTML = html;
 }
 
-function renderDirCell(item, x, y, w, h, sz) {
+function renderDirCell(item, sz) {
   const node = item.node;
   const palette = DIR_PALETTE[item.index % DIR_PALETTE.length];
   const { files: fc, dirs: dc } = countItems(node);
-  const isSmall = w < 80 || h < 50;
-  const isTiny = w < 45 || h < 30;
-  const headerH = isTiny ? 0 : isSmall ? 22 : 28;
   const dirPath = JSON.stringify([...currentPath, node.name]);
 
   let html = '<div class="dir-cell" data-nav="' + esc(dirPath) + '" data-hover-dir="' + esc(node.name) + '" ';
-  html += 'style="left:' + x + 'px; top:' + y + 'px; width:' + w + 'px; height:' + h + 'px;';
-  html += 'border:1.5px solid ' + palette.border + '; background:' + palette.bg + ';">';
+  html += 'style="border:1.5px solid ' + palette.border + '; background:' + palette.bg + ';">';
 
-  if (!isTiny) {
-    // Header
-    html += '<div class="dir-header" style="height:' + headerH + 'px; padding:' + (isSmall ? '2px 6px' : '4px 10px') + ';';
-    html += 'background:' + palette.header + '; border-bottom:1px solid ' + palette.border + '40;">';
-    html += '<span style="color:' + palette.accent + '">' + FOLDER_SVG + '</span>';
-    html += '<span class="mono" style="font-size:' + sz.cellName + 'px; font-weight:700; color:' + palette.accent + ';';
-    html += 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis">' + esc(node.name) + '/</span>';
-    if (w > 120) {
-      let meta = '';
-      if (dc > 0) meta += dc + 'd';
-      if (dc > 0 && fc > 0) meta += ' \\u00B7 ';
-      if (fc > 0) meta += fc + 'f';
-      html += '<span class="mono" style="margin-left:auto; font-size:9px; color:var(--text-muted); flex-shrink:0">' + meta + '</span>';
-    }
-    html += '</div>';
+  // Folder icon
+  html += '<span style="color:' + palette.accent + '; flex-shrink:0; margin-top:2px">' + FOLDER_SVG + '</span>';
 
-    // Body
-    if (h > 60) {
-      html += '<div class="dir-body" style="padding:' + (isSmall ? '4px' : '8px') + '">';
-      if (w > 100 && node.description) {
-        html += '<div style="font-size:' + sz.cellDesc + 'px; color:var(--ai-desc); line-height:1.3; margin-bottom:4px;';
-        html += 'overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical">';
-        html += esc(node.description) + '</div>';
-      }
-      // Mini chips
-      if (h > 90 && w > 110) {
-        html += '<div class="dir-children" style="max-height:' + (h - headerH - 40) + 'px">';
-        (node.children || []).slice(0, 6).forEach(c => {
-          html += '<span class="dir-chip mono" style="background:' + palette.border + '50; color:' + palette.accent + '">' + esc(c.name) + '/</span>';
-        });
-        (node.files || []).slice(0, 4).forEach(f => {
-          html += '<span class="dir-chip mono" style="background:#1a1a2e50; color:var(--file-color); opacity:0.7">' + esc(f.name) + '</span>';
-        });
-        html += '</div>';
-      }
-      html += '</div>';
-    }
+  // Info column
+  html += '<div class="dir-info">';
 
-    // Zoom hint
-    html += '<div class="zoom-hint mono" style="color:' + palette.accent + '">' + ZOOM_SVG + ' click to explore</div>';
-  } else {
-    // Tiny: just icon
-    html += '<div style="flex:1; display:flex; align-items:center; justify-content:center">';
-    html += '<span style="color:' + palette.accent + '">' + FOLDER_SVG + '</span></div>';
+  // Name + meta
+  html += '<div style="display:flex; align-items:center; gap:8px">';
+  html += '<span class="mono" style="font-size:' + sz.cellName + 'px; font-weight:700; color:' + palette.accent + '">' + esc(node.name) + '/</span>';
+  let meta = '';
+  if (dc > 0) meta += dc + ' folders';
+  if (dc > 0 && fc > 0) meta += ', ';
+  if (fc > 0) meta += fc + ' files';
+  html += '<span class="mono" style="font-size:10px; color:var(--text-muted)">' + meta + '</span>';
+  html += '</div>';
+
+  // Description
+  if (node.description) {
+    html += '<div style="font-size:' + sz.cellDesc + 'px; color:var(--ai-desc); line-height:1.5; margin-top:3px">';
+    html += esc(node.description) + '</div>';
   }
+
+  // Mini chips for children
+  html += '<div class="dir-children">';
+  (node.children || []).slice(0, 6).forEach(c => {
+    html += '<span class="dir-chip mono" style="background:' + palette.border + '50; color:' + palette.accent + '">' + esc(c.name) + '/</span>';
+  });
+  (node.files || []).slice(0, 5).forEach(f => {
+    html += '<span class="dir-chip mono" style="background:#1a1a2e50; color:var(--file-color); opacity:0.7">' + esc(f.name) + '</span>';
+  });
+  html += '</div>';
+
+  html += '</div>'; // close dir-info
+
+  // Zoom hint
+  html += '<div class="zoom-hint mono" style="color:' + palette.accent + '">' + ZOOM_SVG + ' explore</div>';
 
   html += '</div>';
   return html;
 }
 
-function renderFileCell(item, x, y, w, h, sz) {
+function renderFileCell(item, sz) {
   const file = item.node;
-  const isTiny = w < 50 || h < 28;
-  const isSmall = w < 100 || h < 45;
   const fullPath = [DATA.name, ...currentPath, file.name].join('/');
 
-  let html = '<div class="file-cell" data-open="' + esc(fullPath) + '" data-hover-file="' + esc(file.name) + '" ';
-  html += 'style="left:' + x + 'px; top:' + y + 'px; width:' + w + 'px; height:' + h + 'px;';
-  html += 'padding:' + (isTiny ? '2px' : isSmall ? '4px' : '8px') + '; cursor:pointer;">';
+  let html = '<div class="file-cell" data-open="' + esc(fullPath) + '" data-hover-file="' + esc(file.name) + '">';
+
+  // File icon
+  html += '<span style="color:var(--file-color); flex-shrink:0; margin-top:2px">' + FILE_SVG + '</span>';
+
+  // Info column
+  html += '<div class="file-info">';
 
   // File name
-  html += '<div style="display:flex; align-items:center; gap:4px; overflow:hidden; flex-shrink:0">';
-  if (!isTiny) html += '<span style="color:var(--file-color)">' + FILE_SVG + '</span>';
-  html += '<span class="mono" style="font-size:' + (isTiny ? 8 : sz.cellName) + 'px; font-weight:600; color:var(--text);';
-  html += 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis">' + esc(file.name) + '</span>';
-  html += '</div>';
+  html += '<span class="mono" style="font-size:' + sz.cellName + 'px; font-weight:600; color:var(--text)">' + esc(file.name) + '</span>';
 
-  // Description
-  if (!isSmall && h > 40 && file.purpose && file.purpose !== '\\u2014') {
-    const maxLines = Math.max(1, Math.floor((h - 30) / 14));
-    html += '<div style="font-size:' + sz.cellDesc + 'px; color:var(--ai-desc); line-height:1.3; margin-top:3px;';
-    html += 'overflow:hidden; display:-webkit-box; -webkit-line-clamp:' + maxLines + '; -webkit-box-orient:vertical">';
+  // Description — full width, no clamp
+  if (file.purpose && file.purpose !== '\\u2014') {
+    html += '<div style="font-size:' + sz.cellDesc + 'px; color:var(--ai-desc); line-height:1.5; margin-top:3px">';
     html += esc(file.purpose) + '</div>';
   }
 
   // Tags
-  if (!isSmall && h > 55 && (file.tags || []).length > 0 && w > 80) {
-    html += '<div class="tags">';
-    (file.tags || []).slice(0, 3).forEach(t => { html += renderTag(t, sz.tag); });
+  if ((file.tags || []).length > 0) {
+    html += '<div class="tags" style="margin-top:5px">';
+    (file.tags || []).slice(0, 5).forEach(t => { html += renderTag(t, sz.tag); });
     html += '</div>';
   }
+
+  html += '</div>'; // close file-info
 
   // Open hint
   html += '<div class="file-open-hint mono"><span style="color:var(--accent)">' + EXTERNAL_SVG + '</span> open</div>';
@@ -748,9 +728,11 @@ function showTooltip(el, type) {
   const sz = TEXT_SIZES[textSize];
 
   const rect = el.getBoundingClientRect();
-  const containerRect = document.getElementById('treemap-container').getBoundingClientRect();
+  const container = document.getElementById('treemap-container');
+  const containerRect = container.getBoundingClientRect();
+  const scrollTop = container.scrollTop;
   const cx = rect.left + rect.width / 2 - containerRect.left;
-  const cy = rect.top - containerRect.top;
+  const cy = rect.top - containerRect.top + scrollTop;
 
   let name, desc, tags, snippet;
   if (type === 'dir') {
@@ -768,12 +750,13 @@ function showTooltip(el, type) {
   }
 
   const tooltipW = 300;
+  const cW = container.clientWidth;
   let tooltipH = snippet ? 200 : desc && desc !== '\\u2014' ? 100 : 60;
   let left = cx - tooltipW / 2;
   let top = cy - tooltipH - 10;
   if (left < 10) left = 10;
-  if (left + tooltipW > containerW - 10) left = containerW - tooltipW - 10;
-  if (top < 10) top = cy + rect.height + 10;
+  if (left + tooltipW > cW - 10) left = cW - tooltipW - 10;
+  if (top < scrollTop + 10) top = cy + rect.height + 10;
 
   const icon = type === 'dir'
     ? '<span style="color:var(--folder-color)">' + FOLDER_SVG + '</span>'
@@ -886,39 +869,10 @@ document.addEventListener('mouseleave', function(e) {
   }
 }, true);
 
-// ResizeObserver to re-layout on resize
-const resizeObs = new ResizeObserver(entries => {
-  const { width, height } = entries[0].contentRect;
-  if (width > 0 && height > 0 && (Math.abs(width - containerW) > 5 || Math.abs(height - containerH) > 5)) {
-    containerW = width;
-    containerH = height;
-    // Re-render just the cells
-    const node = currentPath.length === 0 ? DATA : getNodeAtPath(DATA, currentPath);
-    if (node) {
-      const items = [];
-      (node.children || []).forEach((c, i) => {
-        items.push({ type: 'dir', node: c, name: c.name, value: totalWeight(c), index: i });
-      });
-      (node.files || []).forEach((f, i) => {
-        items.push({ type: 'file', node: f, name: f.name, value: 1, index: i });
-      });
-      renderTreemapCells(items);
-    }
-  }
-});
-
 // Initial render
 try {
   console.log('Grimoire: starting initial render, DATA has ' + (DATA.children || []).length + ' dirs, ' + (DATA.files || []).length + ' files');
   render();
-  // Observe after first render
-  requestAnimationFrame(() => {
-    const c = document.getElementById('treemap-container');
-    if (c) {
-      resizeObs.observe(c);
-      console.log('Grimoire: ResizeObserver attached');
-    }
-  });
 } catch(e) {
   console.error('Grimoire init error:', e);
   document.getElementById('app').innerHTML = '<div style="padding:40px;color:#f87171;font-family:monospace"><h2>Grimoire Error</h2><pre>' + e.message + '\\n' + e.stack + '</pre></div>';
