@@ -1,6 +1,6 @@
 {
-  "name": "grimoire",
-  "displayName": "Grimoire",
+  "name": "grimoire-ai",
+  "displayName": "Grimoire — AI Codebase Map",
   "description": "Your codebase, decoded — AI-powered treemap visualization, inline annotation, import-based tags, and plain-English descriptions for any project",
   "version": "0.5.0",
   "publisher": "godinez-llc",
