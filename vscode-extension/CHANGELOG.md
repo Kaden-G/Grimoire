@@ -15,12 +15,15 @@
 
 ## 0.3.1 — 2026-04-01
 
-### CI/CD
-- add auto-versioning, changelog generation, and conventional commit enforcement (ce8d482)
+### Features
+- Restored treemap spatial layout for the interactive repo map
+- Separated Quick Scan (heuristic) from AI Scan into distinct commands
+- Added inline "Strip All Grimoire Comments" option to both single-file and bulk annotation dropdowns
+- Updated welcome panel with two-step scan flow (Quick Scan vs AI Scan)
 
 ### Maintenance
-- bump to v0.2.0, optimize vsix packaging, update changelog (9378883)
-- bump version to 0.1.1 and update changelog [skip ci] (7714ddc)
+- Unified uncommitted marketplace changes with dev branch
+- Auto-version bump via conventional commits pipeline
 
 ## 0.3.0 — 2026-04-01
 
