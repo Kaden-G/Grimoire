@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — 2026-04-02
+
+### Features
+- unify scan commands, replace treemap with grid layout, add inline strip option (17a1630)
+
+### CI/CD
+- add auto-versioning, changelog generation, and conventional commit enforcement (ce8d482)
+
+### Maintenance
+- bump version to 0.3.1 and update changelog [skip ci] (c9ab905)
+- bump to v0.2.0, optimize vsix packaging, update changelog (9378883)
+- bump version to 0.1.1 and update changelog [skip ci] (7714ddc)
+
 ## 0.3.1 — 2026-04-01
 
 ### CI/CD

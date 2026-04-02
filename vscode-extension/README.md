@@ -8,6 +8,11 @@ Built for **vibe coders**, non-technical teammates, and anyone who inherits a co
 
 ---
 
+### What's New in 0.4.0
+
+- unify scan commands, replace treemap with grid layout, add inline strip option
+
+
 ## Features
 
 ### Interactive Treemap
