@@ -109,6 +109,16 @@
         "command": "grim.setup",
         "title": "Grimoire: Setup / API Key",
         "icon": "$(key)"
+      },
+      {
+        "command": "grim.exportMarkdown",
+        "title": "Grimoire: Export as Markdown",
+        "icon": "$(markdown)"
+      },
+      {
+        "command": "grim.shareGist",
+        "title": "Grimoire: Share to GitHub Gist",
+        "icon": "$(link-external)"
       }
     ],
     "menus": {

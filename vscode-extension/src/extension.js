@@ -12,6 +12,8 @@ const { GrimoireTreeProvider } = require('./treeProvider');
 const { GrimoirePanel } = require('./webviewPanel');
 const { annotateFile, annotateWorkspace, eraseAllComments } = require('./annotator');
 const { WelcomePanel } = require('./welcomePanel');
+const { exportToMarkdown } = require('./grimoireExporter');
+const { createGist } = require('./gistShare');
 
 let treeProvider;
 let lastScanResult = null;
@@ -372,6 +374,102 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('grim.eraseComments', async () => {
       await eraseAllComments();
+    })
+  );
+
+  // ─── Command: Export as Markdown ───
+  // Reads the current .grimoire.json and writes a clean GRIMOIRE_MAP.md alongside it.
+  // Also available via the webview toolbar "Export .md" button.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('grim.exportMarkdown', async () => {
+      const workspacePath = getWorkspacePath();
+      if (!workspacePath) return;
+
+      const jsonPath = path.join(workspacePath, '.grimoire.json');
+      if (!fs.existsSync(jsonPath)) {
+        vscode.window.showWarningMessage('No .grimoire.json found. Run "Grimoire: Scan Workspace" first.');
+        return;
+      }
+
+      try {
+        const raw = fs.readFileSync(jsonPath, 'utf8');
+        const data = JSON.parse(raw);
+        const projectName = path.basename(workspacePath);
+
+        const markdown = exportToMarkdown(data, { projectName });
+        const outputPath = path.join(workspacePath, 'GRIMOIRE_MAP.md');
+        fs.writeFileSync(outputPath, markdown, 'utf8');
+
+        // Open the generated markdown file for preview
+        const doc = await vscode.workspace.openTextDocument(outputPath);
+        await vscode.window.showTextDocument(doc, { preview: true });
+        vscode.window.showInformationMessage(`Exported to ${path.basename(outputPath)}`);
+      } catch (err) {
+        vscode.window.showErrorMessage(`Export failed: ${err.message}`);
+      }
+    })
+  );
+
+  // ─── Command: Share to GitHub Gist ───
+  // Exports markdown, then pushes it (+ JSON) to a GitHub Gist.
+  // Uses VS Code's built-in GitHub auth — works for free AND Pro users.
+  // Returns a shareable URL. Stores the Gist ID in workspace state so
+  // re-sharing updates the same Gist instead of creating duplicates.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('grim.shareGist', async () => {
+      const workspacePath = getWorkspacePath();
+      if (!workspacePath) return;
+
+      const jsonPath = path.join(workspacePath, '.grimoire.json');
+      if (!fs.existsSync(jsonPath)) {
+        vscode.window.showWarningMessage('No .grimoire.json found. Run "Grimoire: Scan Workspace" first.');
+        return;
+      }
+
+      try {
+        const raw = fs.readFileSync(jsonPath, 'utf8');
+        const data = JSON.parse(raw);
+        const projectName = path.basename(workspacePath);
+
+        // Generate markdown
+        const markdown = exportToMarkdown(data, { projectName });
+
+        // Show progress notification
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Sharing to GitHub Gist...',
+            cancellable: false,
+          },
+          async () => {
+            const result = await createGist({
+              markdown,
+              json: raw,
+              projectName,
+            });
+
+            // Store Gist ID for future updates
+            context.workspaceState.update('grimoire.lastGistId', result.id);
+
+            // Show success with clickable link
+            const action = await vscode.window.showInformationMessage(
+              `Gist created! ${result.url}`,
+              'Open in Browser',
+              'Copy URL'
+            );
+
+            if (action === 'Open in Browser') {
+              vscode.env.openExternal(vscode.Uri.parse(result.url));
+            } else if (action === 'Copy URL') {
+              await vscode.env.clipboard.writeText(result.url);
+              vscode.window.showInformationMessage('Gist URL copied to clipboard!');
+            }
+          }
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(`Share failed: ${err.message}`);
+        throw err; // Re-throw so webview gets the failure signal
+      }
     })
   );
 

@@ -73,6 +73,19 @@ class GrimoirePanel {
       case 'showInfo':
         vscode.window.showInformationMessage(msg.text);
         break;
+      case 'exportMarkdown':
+        // Delegate to the registered command (keeps logic centralized in extension.js)
+        vscode.commands.executeCommand('grim.exportMarkdown');
+        break;
+      case 'shareGist':
+        // Delegate to the registered command; it will handle auth + API call
+        vscode.commands.executeCommand('grim.shareGist').then(() => {
+          // Reset button state in webview after completion
+          this._panel.webview.postMessage({ command: 'gistComplete', success: true });
+        }, () => {
+          this._panel.webview.postMessage({ command: 'gistComplete', success: false });
+        });
+        break;
     }
   }
 
@@ -282,6 +295,15 @@ class GrimoirePanel {
   }
   .pe-toggle.on { border: 1px solid rgba(56,189,248,0.4); background: var(--accent-dim); color: var(--accent); }
   .pe-toggle.off { border: 1px solid var(--border); background: transparent; color: var(--text-muted); }
+  .toolbar-btn {
+    display: flex; align-items: center; gap: 5px; padding: 4px 10px;
+    border-radius: 8px; cursor: pointer; font-size: 10.5px; font-weight: 600;
+    border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .toolbar-btn.success { border-color: rgba(34,197,94,0.5); color: #22c55e; background: rgba(34,197,94,0.1); }
+  .toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* Empty state */
   .empty { text-align: center; padding: 60px; color: var(--text-dim); }
@@ -583,6 +605,10 @@ function render() {
   const peEmoji = plainEnglish ? '\\uD83D\\uDDE3\\uFE0F' : '\\uD83D\\uDD27';
   const peLabel = plainEnglish ? 'Plain English' : 'Technical';
   html += '<button class="pe-toggle mono ' + peClass + '" id="pe-toggle"><span style="font-size:13px">' + peEmoji + '</span> ' + peLabel + '</button>';
+  // ─── Export & Share buttons ───
+  html += '<div class="toolbar-divider"></div>';
+  html += '<button class="toolbar-btn mono" id="btn-export-md" title="Export as Markdown file"><span style="font-size:12px">\\uD83D\\uDCC4</span> Export .md</button>';
+  html += '<button class="toolbar-btn mono" id="btn-share-gist" title="Share to GitHub Gist"><span style="font-size:12px">\\uD83D\\uDD17</span> Share Gist</button>';
   html += '</div>';
 
   html += '</div>'; // close treemap-container
@@ -847,6 +873,21 @@ document.addEventListener('click', function(e) {
     render();
     return;
   }
+
+  // Export Markdown
+  if (e.target.closest('#btn-export-md')) {
+    vscodeApi.postMessage({ command: 'exportMarkdown' });
+    return;
+  }
+
+  // Share to Gist
+  const gistBtn = e.target.closest('#btn-share-gist');
+  if (gistBtn) {
+    gistBtn.disabled = true;
+    gistBtn.innerHTML = '<span style="font-size:12px">\\u23F3</span> Sharing...';
+    vscodeApi.postMessage({ command: 'shareGist' });
+    return;
+  }
 });
 
 // Hover events for tooltips
@@ -868,6 +909,27 @@ document.addEventListener('mouseleave', function(e) {
     hideTooltip();
   }
 }, true);
+
+// Listen for messages from the extension (e.g., gist completion feedback)
+window.addEventListener('message', function(event) {
+  const msg = event.data;
+  if (msg.command === 'gistComplete') {
+    const btn = document.getElementById('btn-share-gist');
+    if (btn) {
+      btn.disabled = false;
+      if (msg.success) {
+        btn.innerHTML = '<span style="font-size:12px">\\u2705</span> Shared!';
+        btn.classList.add('success');
+        setTimeout(() => {
+          btn.innerHTML = '<span style="font-size:12px">\\uD83D\\uDD17</span> Share Gist';
+          btn.classList.remove('success');
+        }, 3000);
+      } else {
+        btn.innerHTML = '<span style="font-size:12px">\\uD83D\\uDD17</span> Share Gist';
+      }
+    }
+  }
+});
 
 // Initial render
 try {
