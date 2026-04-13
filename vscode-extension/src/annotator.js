@@ -281,9 +281,6 @@ async function annotateFile(apiKey, model) {
   const mode = ANNOTATION_MODES[selected._key];
 
   // ─── Comment Strategy: Replace vs Merge ───
-  // If the file already has Grimoire comments, determine how to handle them.
-  // Default behavior: Replace (strip existing ᚲ comments before re-annotating).
-  // The user's setting can override this, or they can choose interactively.
   let codeToAnnotate = code;
   const existingModes = detectModes(code);
 
@@ -292,7 +289,6 @@ async function annotateFile(apiKey, model) {
     const strategy = config.get('commentStrategy', 'replace');
 
     if (strategy === 'ask') {
-      // Interactive: let the user decide each time
       const existingLabel = existingModes.join(', ');
       const commentCount = countGrimoireComments(code);
       const strategyPick = await vscode.window.showQuickPick(
@@ -325,19 +321,14 @@ async function annotateFile(apiKey, model) {
         const { stripped } = stripGrimoireComments(code);
         codeToAnnotate = stripped;
       }
-      // 'merge' → codeToAnnotate stays as original code (comments preserved)
     } else if (strategy === 'replace') {
-      // Default: silently replace
       const { stripped } = stripGrimoireComments(code);
       codeToAnnotate = stripped;
     }
-    // 'merge' strategy → codeToAnnotate stays as original code
   }
 
-  // Build the prompt
   const prompt = mode.prompt(codeToAnnotate, fileName, language);
 
-  // Call the API with progress
   let annotatedCode;
   await vscode.window.withProgress(
     {
@@ -361,18 +352,15 @@ async function annotateFile(apiKey, model) {
 
   if (!annotatedCode) return;
 
-  // Clean up any accidental markdown fences the model might have added
   annotatedCode = annotatedCode
     .replace(/^```[\w]*\n?/, '')
     .replace(/\n?```\s*$/, '');
 
-  // Show diff view: original vs annotated
   const originalUri = document.uri;
   const annotatedUri = vscode.Uri.parse(
     `grimoire-annotated:${fileName}?mode=${selected._key}&ts=${Date.now()}`
   );
 
-  // Register a temporary content provider for the annotated version
   const provider = new AnnotatedContentProvider(annotatedCode);
   const disposable = vscode.workspace.registerTextDocumentContentProvider('grimoire-annotated', provider);
 
@@ -384,7 +372,6 @@ async function annotateFile(apiKey, model) {
     { preview: true }
   );
 
-  // Offer to apply
   const action = await vscode.window.showInformationMessage(
     `Annotated ${fileName} with ${selected._key} comments. Apply changes?`,
     'Apply to File',
@@ -534,7 +521,7 @@ async function annotateWorkspace(apiKey, model) {
     if (proceed !== 'Annotate Anyway') return;
   }
 
-  // ─── Mode selection (includes strip option for workspace-wide erase) ───
+  // ─── Mode selection ───
   const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
     label: mode.label,
     description: mode.description,
@@ -542,7 +529,6 @@ async function annotateWorkspace(apiKey, model) {
     _key: key,
   }));
 
-  // Add strip option so mass removal is discoverable alongside annotation modes
   modeItems.push({
     label: '$(trash) Strip All Grimoire Comments',
     description: 'Remove all ᚲ comments from every file in this workspace',
@@ -556,7 +542,6 @@ async function annotateWorkspace(apiKey, model) {
   });
   if (!selected) return;
 
-  // Handle workspace-wide erase: delegate to eraseAllComments and return early
   if (selected._key === '_erase_all') {
     await eraseAllComments();
     return;
@@ -575,7 +560,13 @@ async function annotateWorkspace(apiKey, model) {
   const files = [];
   function walkDir(dir) {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      // FIX: log walkDir failures instead of silently swallowing them
+      console.error(`[Grimoire] walkDir failed on "${dir}": ${err.message}`);
+      return;
+    }
     for (const entry of entries) {
       if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
       const fullPath = path.join(dir, entry.name);
@@ -586,10 +577,16 @@ async function annotateWorkspace(apiKey, model) {
         if (ANNOTATABLE_EXTENSIONS.has(ext)) {
           try {
             const stat = fs.statSync(fullPath);
-            if (stat.size < 100000 && stat.size > 10) { // Skip huge or empty files
+            if (stat.size < 100000 && stat.size > 10) {
               files.push(fullPath);
+            } else {
+              // FIX: log why files are being skipped at the collection stage
+              console.warn(`[Grimoire] Skipping "${fullPath}" — size ${stat.size} bytes (limit: 10–100000)`);
             }
-          } catch {}
+          } catch (err) {
+            // FIX: log stat failures instead of silently swallowing them
+            console.error(`[Grimoire] statSync failed on "${fullPath}": ${err.message}`);
+          }
         }
       }
     }
@@ -601,7 +598,6 @@ async function annotateWorkspace(apiKey, model) {
     return;
   }
 
-  // Confirm with user
   const confirm = await vscode.window.showInformationMessage(
     `Grimoire will annotate ${files.length} files in-place using "${selected._key}" mode. This will call the Claude API for each file.`,
     { modal: true },
@@ -614,6 +610,9 @@ async function annotateWorkspace(apiKey, model) {
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
+
+  // FIX: track per-file failure reasons so we can surface them in the summary
+  const failureLog = [];
 
   await vscode.window.withProgress(
     {
@@ -631,7 +630,6 @@ async function annotateWorkspace(apiKey, model) {
         const filePath = files[i];
         const fileName = path.basename(filePath);
         const relPath = path.relative(workspacePath, filePath);
-        const pct = Math.round(((i + 1) / files.length) * 100);
         progress.report({
           increment: (1 / files.length) * 100,
           message: `(${i + 1}/${files.length}) ${relPath}`,
@@ -640,18 +638,13 @@ async function annotateWorkspace(apiKey, model) {
         try {
           let code = fs.readFileSync(filePath, 'utf8');
 
-          // ─── Apply comment strategy for bulk annotation ───
-          // In bulk mode, we always use the configured strategy (no interactive prompt).
-          // Default: replace — strip existing ᚲ comments before re-annotating.
           const bulkConfig = vscode.workspace.getConfiguration('grim');
           const bulkStrategy = bulkConfig.get('commentStrategy', 'replace');
           if (bulkStrategy === 'replace' && hasGrimoireComments(code)) {
             const { stripped } = stripGrimoireComments(code);
             code = stripped;
           }
-          // 'merge' or 'ask' in bulk mode → treat as merge (no interactive prompt in bulk)
 
-          // Detect language from extension
           const ext = path.extname(fileName).toLowerCase();
           const langMap = {
             '.js': 'JavaScript', '.jsx': 'JavaScript (React)', '.ts': 'TypeScript',
@@ -669,18 +662,17 @@ async function annotateWorkspace(apiKey, model) {
           const prompt = mode.prompt(code, fileName, language);
           let annotated = await callAnnotationAPI(apiKey, model, prompt, token);
 
-          // Clean markdown fences
           annotated = annotated.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/, '');
 
-          // Write in-place
           fs.writeFileSync(filePath, annotated, 'utf8');
           succeeded++;
         } catch (err) {
-          console.warn(`Grimoire: Failed to annotate ${relPath}: ${err.message}`);
+          // FIX: log the full error (not just message) and collect for summary
+          console.error(`[Grimoire] FAILED: "${relPath}" — ${err.message}`, err);
+          failureLog.push({ relPath, reason: err.message });
           failed++;
         }
 
-        // Small delay to avoid API rate limits
         if (i < files.length - 1) {
           await new Promise(r => setTimeout(r, 500));
         }
@@ -688,12 +680,31 @@ async function annotateWorkspace(apiKey, model) {
     }
   );
 
-  // Summary
+  // ─── Summary ───
   let summary = `Grimoire: Annotated ${succeeded} files with "${selected._key}" comments.`;
   if (failed > 0) summary += ` ${failed} failed.`;
   if (skipped > 0) summary += ` ${skipped} skipped (cancelled).`;
 
-  if (hasGit && succeeded > 0) {
+  // FIX: if there were failures, offer to show details instead of silently moving on
+  if (failed > 0) {
+    const failDetails = failureLog
+      .map(f => `• ${f.relPath}: ${f.reason}`)
+      .join('\n');
+
+    const action = await vscode.window.showWarningMessage(
+      summary + ' Check the Output panel (Grimoire) for details, or click below.',
+      'Show Failed Files',
+      'OK'
+    );
+
+    if (action === 'Show Failed Files') {
+      const doc = await vscode.workspace.openTextDocument({
+        content: `Grimoire — Annotation Failures\n${'─'.repeat(40)}\n\n${failDetails}`,
+        language: 'plaintext',
+      });
+      await vscode.window.showTextDocument(doc);
+    }
+  } else if (hasGit && succeeded > 0) {
     const action = await vscode.window.showInformationMessage(
       summary + ' You can review changes with `git diff` and revert with `git checkout .` if needed.',
       'View Git Diff',
@@ -714,11 +725,6 @@ async function annotateWorkspace(apiKey, model) {
 /**
  * Strips all ᚲ-tagged comments from every source file in the workspace
  * and deletes .grimoire.json. Full clean slate — as if Grimoire was never run.
- *
- * Design decision: Full reset rather than "comments only" erase.
- * Why: If the user has edited code since annotation, .grimoire.json line mappings
- * are stale and the comments themselves may reference outdated logic. Preserving
- * metadata gives false confidence. Better to force a fresh scan when they're ready.
  */
 async function eraseAllComments() {
   const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -731,7 +737,6 @@ async function eraseAllComments() {
   const fs = require('fs');
   const path = require('path');
 
-  // ─── Scan for files with Grimoire comments ───
   const config = vscode.workspace.getConfiguration('grim');
   const excludeDirs = new Set([
     'node_modules', '.git', '.svn', 'dist', 'build', 'out', '.next', '__pycache__',
@@ -741,10 +746,14 @@ async function eraseAllComments() {
 
   const filesToClean = [];
 
-  // Walk the workspace to find files with ᚲ comments
   function walkDir(dir) {
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      console.error(`[Grimoire] walkDir failed on "${dir}": ${err.message}`);
+      return;
+    }
     for (const entry of entries) {
       if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
       const fullPath = path.join(dir, entry.name);
@@ -758,14 +767,15 @@ async function eraseAllComments() {
             if (hasGrimoireComments(content)) {
               filesToClean.push(fullPath);
             }
-          } catch {}
+          } catch (err) {
+            console.error(`[Grimoire] Could not read "${fullPath}" during erase scan: ${err.message}`);
+          }
         }
       }
     }
   }
   walkDir(workspacePath);
 
-  // Check for .grimoire.json
   const grimoireJsonPath = path.join(workspacePath, '.grimoire.json');
   const hasGrimoireJson = fs.existsSync(grimoireJsonPath);
 
@@ -774,7 +784,6 @@ async function eraseAllComments() {
     return;
   }
 
-  // ─── Confirm with user ───
   const parts = [];
   if (filesToClean.length > 0) parts.push(`${filesToClean.length} files with ᚲ comments`);
   if (hasGrimoireJson) parts.push('.grimoire.json');
@@ -791,7 +800,6 @@ async function eraseAllComments() {
     return;
   }
 
-  // ─── Strip comments from all files ───
   let cleaned = 0;
   let totalRemoved = 0;
 
@@ -817,23 +825,21 @@ async function eraseAllComments() {
           cleaned++;
           totalRemoved += count;
         } catch (err) {
-          console.warn(`Grimoire: Failed to clean ${relPath}: ${err.message}`);
+          console.error(`[Grimoire] Failed to clean "${relPath}": ${err.message}`);
         }
       }
 
-      // Delete .grimoire.json
       if (hasGrimoireJson) {
         try {
           fs.unlinkSync(grimoireJsonPath);
           progress.report({ increment: 10, message: 'Deleted .grimoire.json' });
         } catch (err) {
-          console.warn(`Grimoire: Failed to delete .grimoire.json: ${err.message}`);
+          console.error(`[Grimoire] Failed to delete .grimoire.json: ${err.message}`);
         }
       }
     }
   );
 
-  // ─── Summary ───
   let summary = `Grimoire: Erased ${totalRemoved} comments from ${cleaned} files.`;
   if (hasGrimoireJson) summary += ' Deleted .grimoire.json.';
   summary += ' Clean slate.';
