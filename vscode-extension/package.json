@@ -8,11 +8,11 @@
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/grimoire-dev/grimoire"
+    "url": "https://github.com/Kaden-G/Grimoire"
   },
   "homepage": "https://grimoire.dev",
   "bugs": {
-    "url": "https://github.com/grimoire-dev/grimoire/issues"
+    "url": "https://github.com/Kaden-G/Grimoire/issues"
   },
   "engines": {
     "vscode": "^1.80.0"

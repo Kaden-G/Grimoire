@@ -10,3 +10,4 @@ INSTALL.md
 src/__tests__/**
 *.vsix
 .grimoire.json
+.grimoire-context.md

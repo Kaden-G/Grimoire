@@ -66,7 +66,7 @@ Grimoire ships with a **zero-dependency** [Model Context Protocol](https://model
 | `file_purpose` | What a specific file or directory does |
 | `files_with_tag` | Every file for a capability tag (`auth`, `database`, …) |
 
-Setup snippets for each client are in [`mcp/README.md`](mcp/README.md).
+Setup snippets for each client are in [the MCP server README](https://github.com/Kaden-G/Grimoire/blob/master/vscode-extension/mcp/README.md).
 
 ### Living Incremental Scans
 Re-scanning only re-describes files whose header changed — unchanged files reuse their previous description. Keeping your map (and the exported agent context) fresh after edits costs only the changed files, not the whole repo. On by default via `grim.incremental`.
@@ -146,7 +146,7 @@ For AI-powered descriptions, add your Anthropic API key:
 
 ## Feedback & Issues
 
-Found a bug? Have a feature request? Open an issue on the [GitHub repository](https://github.com/grimoire-dev/grimoire).
+Found a bug? Have a feature request? Open an issue on the [GitHub repository](https://github.com/Kaden-G/Grimoire).
 
 ---
 
