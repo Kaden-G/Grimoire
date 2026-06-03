@@ -59,8 +59,12 @@ class WelcomePanel {
         try {
           const result = await this._testApiKey(key);
           if (result.success) {
-            // Save the key to settings
-            await vscode.workspace.getConfiguration('grim').update('anthropicApiKey', key, vscode.ConfigurationTarget.Global);
+            // Save the key securely in VS Code SecretStorage (encrypted) — never plaintext settings.
+            await this._context.secrets.store('grim.anthropicApiKey', key);
+            // Clear any legacy plaintext value so no copy remains in settings.json.
+            try {
+              await vscode.workspace.getConfiguration('grim').update('anthropicApiKey', undefined, vscode.ConfigurationTarget.Global);
+            } catch (e) { /* ignore — nothing to clear */ }
             this._panel.webview.postMessage({ command: 'validationResult', success: true });
 
             // Mark onboarding complete
@@ -378,7 +382,7 @@ class WelcomePanel {
     <div style="text-align:center; margin-bottom:28px">
       <div style="font-size:32px; margin-bottom:8px">\uD83D\uDD11</div>
       <h2 style="font-size:20px; font-weight:700; margin-bottom:4px">Enter Your API Key</h2>
-      <p style="color:var(--text-dim); font-size:13px">This is stored locally in your VS Code settings. Never sent anywhere except Anthropic's API.</p>
+      <p style="color:var(--text-dim); font-size:13px">This is stored securely in VS Code's encrypted secret storage. Never sent anywhere except Anthropic's API.</p>
     </div>
 
     <div class="input-group">

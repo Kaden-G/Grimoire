@@ -23,6 +23,8 @@ import json
 import argparse
 import time
 import re
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 try:
@@ -347,6 +349,44 @@ MAX_SCAN_LINES = 40
 MAX_SCAN_BYTES = 4096  # Don't read more than 4KB per file
 
 
+# ─── Secret redaction ───
+# File-header snippets are written into .grimoire.json AND sent to the Claude API.
+# Redact common credential formats so secrets near the top of a source file don't
+# leak into the saved map or the outbound API request. Mirrors redactSecrets() in
+# the VS Code extension's scanner.js.
+_SECRET_TOKEN_RULES = [
+    re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}"),            # Anthropic API keys
+    re.compile(r"sk-[A-Za-z0-9]{16,}"),                  # OpenAI-style keys
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                 # AWS access key id
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),       # GitHub tokens
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),     # Slack tokens
+    re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}\b"),          # Google API keys
+    re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"),  # private keys
+]
+
+# Quoted assignments to sensitive identifiers, e.g. api_key = "abc123".
+# Only matches quoted string values to avoid redacting ordinary code like get_token().
+_SECRET_ASSIGNMENT_RULE = re.compile(
+    r"((?:api[_-]?key|secret|client[_-]?secret|access[_-]?token|auth[_-]?token|token|"
+    r"password|passwd|pwd|bearer|private[_-]?key)\s*[:=]\s*)"
+    r"(['\"])([^'\"\n]{6,})(['\"])",
+    re.IGNORECASE,
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask common credential formats in a code snippet before it is stored or sent."""
+    if not text:
+        return text
+    out = text
+    for rule in _SECRET_TOKEN_RULES:
+        out = rule.sub("***REDACTED***", out)
+    out = _SECRET_ASSIGNMENT_RULE.sub(
+        lambda m: f"{m.group(1)}{m.group(2)}***REDACTED***{m.group(4)}", out
+    )
+    return out
+
+
 def scan_file_header(file_path: Path) -> str | None:
     """Read the first N lines of a file for context (imports, classes, docstrings)."""
     ext = file_path.suffix.lower()
@@ -364,7 +404,7 @@ def scan_file_header(file_path: Path) -> str | None:
             content = f.read(MAX_SCAN_BYTES)
         lines = content.split("\n")[:MAX_SCAN_LINES]
         snippet = "\n".join(lines).strip()
-        return snippet if snippet else None
+        return redact_secrets(snippet) if snippet else None
     except (PermissionError, OSError):
         return None
 
@@ -482,6 +522,24 @@ def apply_descriptions(node: dict, descs: dict, prefix: str = "") -> int:
 
 
 # ─── API calls ───
+# Retryable HTTP status codes (rate limit / overloaded / transient server errors).
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504, 529}
+_MAX_API_ATTEMPTS = 4
+
+
+def _backoff_sleep(attempt: int, retry_after=None) -> None:
+    """Sleep with exponential backoff + jitter, honoring a Retry-After header (seconds)."""
+    delay = None
+    if retry_after:
+        try:
+            delay = min(float(retry_after), 60.0)
+        except (TypeError, ValueError):
+            delay = None
+    if delay is None:
+        delay = min(2 ** (attempt - 1), 16) + random.random() * 0.5
+    time.sleep(delay)
+
+
 def call_claude_sdk(client, paths: list[str], readme: str, model: str, snippets: dict = None, plain_english: bool = True) -> dict:
     """Call Claude using the official Python SDK."""
     prompt = build_prompt(paths, readme, snippets, plain_english=plain_english)
@@ -514,11 +572,29 @@ def call_claude_http(api_key: str, paths: list[str], readme: str, model: str, sn
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode())
-
-    text = "".join(b.get("text", "") for b in data.get("content", []))
-    return parse_response(text)
+    # Retry on rate limits / transient server errors with exponential backoff.
+    last_err = None
+    for attempt in range(1, _MAX_API_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                data = json.loads(resp.read().decode())
+            text = "".join(b.get("text", "") for b in data.get("content", []))
+            return parse_response(text)
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in _RETRYABLE_STATUS and attempt < _MAX_API_ATTEMPTS:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                _backoff_sleep(attempt, retry_after)
+                continue
+            raise
+        except urllib.error.URLError as e:
+            last_err = e
+            if attempt < _MAX_API_ATTEMPTS:
+                _backoff_sleep(attempt, None)
+                continue
+            raise
+    if last_err:
+        raise last_err
 
 
 def build_prompt(paths: list[str], readme: str, snippets: dict = None, plain_english: bool = True) -> str:
@@ -571,8 +647,63 @@ def build_prompt(paths: list[str], readme: str, snippets: dict = None, plain_eng
 
 
 def parse_response(text: str) -> dict:
-    clean = re.sub(r"```json|```", "", text).strip()
-    return json.loads(clean)
+    clean = re.sub(r"```json|```", "", text or "").strip()
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        # Tolerate stray prose/preamble: extract the outermost { ... } block.
+        start = clean.find("{")
+        end = clean.rfind("}")
+        if start != -1 and end > start:
+            return json.loads(clean[start:end + 1])
+        raise
+
+
+def load_previous_map(path: str):
+    """Load a previously saved .grimoire.json for incremental re-scans (or None)."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _collect_descriptions(node: dict, prefix: str = "") -> dict:
+    """Map every path -> its non-placeholder description, matching collect_paths()."""
+    out = {}
+    cur = f"{prefix}/{node['name']}" if prefix else node["name"]
+    desc = node.get("description")
+    if desc and desc != "\u2014":
+        out[cur] = desc
+    for f in node.get("files", []):
+        purpose = f.get("purpose")
+        if purpose and purpose != "\u2014":
+            out[f"{cur}/{f['name']}"] = purpose
+    for c in node.get("children", []):
+        out.update(_collect_descriptions(c, cur))
+    return out
+
+
+def plan_descriptions(prev, all_paths, snippets, plain_english):
+    """Return (to_describe, reuse): reuse descriptions for unchanged paths from `prev`.
+
+    A description is a pure function of path + header snippet + style, so any path
+    whose snippet is unchanged can reuse the previous description (the "living map").
+    """
+    reuse = {}
+    if not prev or not prev.get("tree") or prev.get("plainEnglish") != plain_english:
+        return list(all_paths), reuse
+    prev_desc = _collect_descriptions(prev["tree"])
+    prev_snips = prev.get("snippets") or {}
+    snippets = snippets or {}
+    to_describe = []
+    for p in all_paths:
+        cached = prev_desc.get(p)
+        if cached and prev_snips.get(p) == snippets.get(p):
+            reuse[p] = cached
+        else:
+            to_describe.append(p)
+    return to_describe, reuse
 
 
 def generate_descriptions(
@@ -583,8 +714,9 @@ def generate_descriptions(
     batch_size: int = 30,
     snippets: dict = None,
     plain_english: bool = True,
+    paths: list = None,
 ) -> dict:
-    all_paths = collect_paths(tree)
+    all_paths = paths if paths is not None else collect_paths(tree)
     total = len(all_paths)
     mode_label = "plain English" if plain_english else "technical"
     print(f"\n🔍 Found {total} items to describe ({mode_label} mode)")
@@ -599,6 +731,8 @@ def generate_descriptions(
     print(f"📦 Splitting into {len(batches)} batch(es) of up to {effective_batch}")
 
     all_descs = {}
+    if not batches:
+        return all_descs
 
     # Choose SDK or HTTP
     client = None
@@ -608,28 +742,35 @@ def generate_descriptions(
     else:
         print("🔗 Using raw HTTP (install `anthropic` package for SDK)")
 
-    for i, batch in enumerate(batches):
-        # Filter snippets to only those in this batch
+    def run_one(batch):
         batch_snippets = {p: snippets[p] for p in batch if snippets and p in snippets} if snippets else None
+        if client:
+            return call_claude_sdk(client, batch, readme, model, snippets=batch_snippets, plain_english=plain_english)
+        return call_claude_http(api_key, batch, readme, model, snippets=batch_snippets, plain_english=plain_english)
 
-        snip_info = f", {len(batch_snippets)} with code" if batch_snippets else ""
-        print(f"\n  Batch {i + 1}/{len(batches)} ({len(batch)} items{snip_info})...", end=" ", flush=True)
-        start = time.time()
+    # Run batches concurrently; retry/backoff is handled inside the API callers.
+    max_workers = min(5, len(batches))
+    print(f"⚡ Generating descriptions with {max_workers} parallel worker(s)...")
+    failed = 0
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {executor.submit(run_one, batch): i for i, batch in enumerate(batches)}
+        for future in as_completed(future_to_idx):
+            i = future_to_idx[future]
+            done += 1
+            try:
+                descs = future.result()
+                all_descs.update(descs)
+                print(f"  ✅ Batch {i + 1}/{len(batches)} → {len(descs)} descriptions  [{done}/{len(batches)} done]")
+            except json.JSONDecodeError as e:
+                failed += 1
+                print(f"  ⚠️  Batch {i + 1} JSON parse error: {e}")
+            except Exception as e:
+                failed += 1
+                print(f"  ❌ Batch {i + 1} error: {e}")
 
-        try:
-            if client:
-                descs = call_claude_sdk(client, batch, readme, model, snippets=batch_snippets, plain_english=plain_english)
-            else:
-                descs = call_claude_http(api_key, batch, readme, model, snippets=batch_snippets, plain_english=plain_english)
-
-            elapsed = time.time() - start
-            print(f"✅ {len(descs)} descriptions ({elapsed:.1f}s)")
-            all_descs.update(descs)
-
-        except json.JSONDecodeError as e:
-            print(f"⚠️  JSON parse error: {e}")
-        except Exception as e:
-            print(f"❌ Error: {e}")
+    if failed:
+        print(f"⚠️  {failed} batch(es) failed — those items kept heuristic descriptions.")
 
     return all_descs
 
@@ -817,6 +958,92 @@ def annotate_command(args):
         print(f"   diff {file_path.name} {out_path.name}")
 
 
+# ─── Agent context export ───
+# Compact, token-budgeted Markdown map for AI coding agents. Mirrors
+# buildAgentContext() in the VS Code extension's agentContext.js — keep in sync.
+_CONTEXT_MAX_CHARS = 120000  # ~30k tokens
+_EM_DASH = "\u2014"
+
+
+def _context_first_paragraph(readme: str) -> str:
+    if not readme:
+        return ""
+    out = []
+    for line in readme.split("\n"):
+        t = line.strip()
+        if not t:
+            if out:
+                break
+            continue
+        if t.startswith("#"):
+            if out:
+                break
+            continue
+        out.append(t)
+    return " ".join(out)[:500]
+
+
+def _collect_context_entries(root: dict) -> list:
+    entries = []
+
+    def walk(node, prefix):
+        for c in node.get("children", []):
+            p = f"{prefix}/{c['name']}" if prefix else c["name"]
+            entries.append(("dir", p + "/", c.get("description") or "", []))
+            walk(c, p)
+        for f in node.get("files", []):
+            p = f"{prefix}/{f['name']}" if prefix else f["name"]
+            purpose = f.get("purpose") or ""
+            if purpose == _EM_DASH:
+                purpose = ""
+            entries.append(("file", p, purpose, f.get("tags") or []))
+
+    if root:
+        walk(root, "")
+    return entries
+
+
+def build_agent_context(map_data: dict, max_chars: int = _CONTEXT_MAX_CHARS) -> str:
+    tree = map_data.get("tree") if isinstance(map_data, dict) and "tree" in map_data else map_data
+    readme = map_data.get("readme", "") if isinstance(map_data, dict) else ""
+    project_name = (tree or {}).get("name", "project")
+
+    entries = _collect_context_entries(tree or {})
+
+    header_lines = [
+        f"# {project_name} — Repo Map (Grimoire)",
+        "",
+        "> Auto-generated semantic map for AI coding agents. Each line is `path — what it does [tags]`.",
+        "> Use it to find where functionality lives before reading files. Regenerate after big changes",
+        "> via the \"Grimoire: Export Agent Context\" command (or `python grimoire.py <dir>`).",
+        "",
+    ]
+    overview = _context_first_paragraph(readme)
+    if overview:
+        header_lines += ["## Overview", "", overview, ""]
+    header_lines += [f"## Map ({len(entries)} entries)", ""]
+    header_str = "\n".join(header_lines)
+
+    budget = max_chars - len(header_str)
+    lines = []
+    omitted = 0
+    for typ, p, desc, tags in entries:
+        tag_str = f" [{', '.join(tags)}]" if tags else ""
+        desc_str = f" — {desc}" if desc else ""
+        line = f"{p}{desc_str}{tag_str}"
+        if typ == "file" and budget - (len(line) + 1) < 0:
+            omitted += 1
+            continue
+        lines.append(line)
+        budget -= len(line) + 1
+
+    body = "\n".join(lines)
+    if omitted:
+        body += f"\n\n_({omitted} additional files omitted to stay within the context budget; see .grimoire.json for the full map.)_"
+
+    return f"{header_str}\n{body}\n"
+
+
 # ─── Main ───
 def main():
     parser = argparse.ArgumentParser(
@@ -861,6 +1088,10 @@ Examples:
     parser.add_argument("--technical", action="store_true",
                         help="Write descriptions using technical terminology (overrides --plain-english)")
     parser.add_argument("--output", help="Output file path (default: <project>/.grimoire.json)")
+    parser.add_argument("--no-context", action="store_true",
+                        help="Skip writing .grimoire-context.md (the AI-agent repo map)")
+    parser.add_argument("--full", action="store_true",
+                        help="Re-describe every file (disable incremental reuse from a previous .grimoire.json)")
 
     args = parser.parse_args()
 
@@ -922,15 +1153,29 @@ Examples:
             print("   Falling back to heuristic descriptions only.\n")
         else:
             use_plain = args.plain_english and not args.technical
-            descs = generate_descriptions(
-                tree, readme, api_key,
-                model=args.model,
-                batch_size=args.batch_size,
-                snippets=snippets if snippets else None,
-                plain_english=use_plain,
-            )
-            applied = apply_descriptions(tree, descs)
-            print(f"\n✨ Applied {applied} AI descriptions")
+
+            # Incremental: reuse descriptions for unchanged paths from the previous map,
+            # only sending new/changed paths to the model (the "living map").
+            prev = None if args.full else load_previous_map(args.output or str(project_path / ".grimoire.json"))
+            all_paths = collect_paths(tree)
+            to_describe, reuse = plan_descriptions(prev, all_paths, snippets or {}, use_plain)
+            reused = apply_descriptions(tree, reuse)
+            if reused:
+                print(f"♻️  Reusing {reused} unchanged descriptions from previous map")
+
+            descs = {}
+            if to_describe:
+                descs = generate_descriptions(
+                    tree, readme, api_key,
+                    model=args.model,
+                    batch_size=args.batch_size,
+                    snippets=snippets if snippets else None,
+                    plain_english=use_plain,
+                    paths=to_describe,
+                )
+            new_applied = apply_descriptions(tree, descs)
+            applied = reused + new_applied
+            print(f"\n✨ Applied {applied} descriptions ({new_applied} new/changed, {reused} reused)")
     else:
         print("⏭️  Skipping AI (--no-ai flag)")
 
@@ -951,6 +1196,7 @@ Examples:
         "readme": readme[:1500] if readme else "",
         "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "model": args.model if not args.no_ai else "heuristics-only",
+        "plainEnglish": args.plain_english and not args.technical,
         "hasSnippets": bool(snippets),
     }
     # Include snippets in output so the UI can show code previews
@@ -963,6 +1209,15 @@ Examples:
     print(f"\n💾 Saved: {output_path}")
     print(f"📎 Import this file into the Grimoire UI to explore your project map.")
     print(f"\n   Tip: Add .grimoire.json to your .gitignore")
+
+    # Agent-context map for AI coding tools (Cursor, Claude Code, Copilot, ...).
+    if not args.no_context:
+        context_path = project_path / ".grimoire-context.md"
+        try:
+            context_path.write_text(build_agent_context(output_data), encoding="utf-8")
+            print(f"🤖 Agent map: {context_path}")
+        except OSError as e:
+            print(f"⚠️  Could not write .grimoire-context.md: {e}")
 
 
 if __name__ == "__main__":

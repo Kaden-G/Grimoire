@@ -12,9 +12,16 @@ const { GrimoireTreeProvider } = require('./treeProvider');
 const { GrimoirePanel } = require('./webviewPanel');
 const { annotateFile, annotateWorkspace, eraseAllComments } = require('./annotator');
 const { WelcomePanel } = require('./welcomePanel');
+const { callAnthropic, parseJsonResponse } = require('./anthropic');
+const { buildAgentContext } = require('./agentContext');
+const { planDescriptions } = require('./incremental');
 
 let treeProvider;
 let lastScanResult = null;
+
+// Secret-storage key for the Anthropic API key. Stored via VS Code SecretStorage
+// (encrypted) — never in plaintext settings.
+const API_KEY_SECRET = 'grim.anthropicApiKey';
 
 function activate(context) {
   console.log('Grimoire: activating');
@@ -35,15 +42,15 @@ function activate(context) {
 
   // Show welcome on first install (no key + never completed onboarding)
   const onboardingDone = context.globalState.get('grimoire.onboardingComplete', false);
-  const config = vscode.workspace.getConfiguration('grim');
-  const hasKey = config.get('anthropicApiKey') || process.env.ANTHROPIC_API_KEY;
-
-  if (!onboardingDone && !hasKey) {
-    // Slight delay so VS Code finishes loading first
-    setTimeout(() => {
-      WelcomePanel.createOrShow(context);
-    }, 1500);
-  }
+  (async () => {
+    const hasKey = await getApiKey(context);
+    if (!onboardingDone && !hasKey) {
+      // Slight delay so VS Code finishes loading first
+      setTimeout(() => {
+        WelcomePanel.createOrShow(context);
+      }, 1500);
+    }
+  })();
 
   // ─── Command: Scan Workspace (auto-includes AI descriptions when API key is available) ───
   context.subscriptions.push(
@@ -52,7 +59,7 @@ function activate(context) {
       if (!workspacePath) return;
 
       const config = vscode.workspace.getConfiguration('grim');
-      let apiKey = config.get('anthropicApiKey') || process.env.ANTHROPIC_API_KEY;
+      let apiKey = await getApiKey(context);
 
       // If no API key, prompt setup — AI descriptions are the core feature
       if (!apiKey) {
@@ -72,6 +79,7 @@ function activate(context) {
             placeHolder: 'sk-ant-...',
           });
           if (!apiKey) return;
+          await storeApiKey(context, apiKey);
         } else if (action !== 'Scan Without AI') {
           return; // dismissed
         }
@@ -110,6 +118,7 @@ function activate(context) {
         }
       }
 
+      let scanSucceeded = false;
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -130,14 +139,31 @@ function activate(context) {
             progress.report({ increment: 30, message: 'Generating AI descriptions...' });
 
             try {
-              const descs = await callClaudeAPI(
-                apiKey, result.allPaths, result.readme,
-                config.get('model', 'claude-sonnet-4-20250514'),
-                config.get('batchSize', 20),
-                result.snippets, progress, token, plainEnglish
-              );
+              // Incremental: reuse descriptions for unchanged paths from the previous
+              // map and only send new/changed paths to the model (the "living map").
+              const incremental = config.get('incremental', true);
+              const prev = incremental ? loadPreviousMap(workspacePath) : null;
+              const { toDescribe, reuse } = planDescriptions({
+                prev,
+                allPaths: result.allPaths,
+                nextSnippets: result.snippets || {},
+                plainEnglish,
+              });
+              const reusedCount = applyDescriptions(result.output.tree, reuse);
 
-              const applied = applyDescriptions(result.output.tree, descs);
+              let failedBatches = 0;
+              let aiApplied = 0;
+              if (toDescribe.length > 0) {
+                const res = await callClaudeAPI(
+                  apiKey, toDescribe, result.readme,
+                  config.get('model', 'claude-sonnet-4-20250514'),
+                  config.get('batchSize', 20),
+                  result.snippets, progress, token, plainEnglish
+                );
+                failedBatches = res.failedBatches;
+                aiApplied = applyDescriptions(result.output.tree, res.descs);
+              }
+              const applied = reusedCount + aiApplied;
               result.output.model = config.get('model', 'claude-sonnet-4-20250514');
               result.output.plainEnglish = plainEnglish;
 
@@ -148,13 +174,16 @@ function activate(context) {
 
               const outputPath = path.join(workspacePath, '.grimoire.json');
               fs.writeFileSync(outputPath, JSON.stringify(result.output, null, 2));
+              ensureGitignored(workspacePath);
+              writeAgentContextIfEnabled(workspacePath, result.output);
+              scanSucceeded = true;
 
               progress.report({ increment: 100, message: 'Done!' });
 
-              const action = await vscode.window.showInformationMessage(
-                `Grimoire: ${applied} AI descriptions applied to ${result.allPaths.length} items.`,
-                'Open Map'
-              );
+              let infoMsg = `Grimoire: ${applied} descriptions on ${result.allPaths.length} items`;
+              infoMsg += reusedCount > 0 ? ` (${aiApplied} new/changed, ${reusedCount} reused).` : '.';
+              if (failedBatches > 0) infoMsg += ` ${failedBatches} batch(es) failed — those items kept heuristic descriptions.`;
+              const action = await vscode.window.showInformationMessage(infoMsg, 'Open Map');
               if (action === 'Open Map') vscode.commands.executeCommand('grim.openMap');
             } catch (err) {
               vscode.window.showErrorMessage(`Grimoire AI Error: ${err.message}`);
@@ -168,6 +197,9 @@ function activate(context) {
 
             const outputPath = path.join(workspacePath, '.grimoire.json');
             fs.writeFileSync(outputPath, JSON.stringify(result.output, null, 2));
+            ensureGitignored(workspacePath);
+            writeAgentContextIfEnabled(workspacePath, result.output);
+            scanSucceeded = true;
 
             progress.report({ increment: 100, message: 'Done!' });
 
@@ -182,8 +214,10 @@ function activate(context) {
         }
       );
 
-      // Run inline annotation after scan completes (outside withProgress so it gets its own progress bar)
-      if (annotationModeKey && apiKey) {
+      // Run inline annotation after scan completes (outside withProgress so it gets its own progress bar).
+      // Only proceed if the scan actually finished (not cancelled), and pass the
+      // already-chosen mode so annotateWorkspace doesn't prompt for it again.
+      if (scanSucceeded && annotationModeKey && apiKey) {
         await annotateWorkspace(apiKey, config.get('model', 'claude-sonnet-4-20250514'), annotationModeKey);
       }
     })
@@ -312,7 +346,7 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('grim.annotateFile', async () => {
       const config = vscode.workspace.getConfiguration('grim');
-      let apiKey = config.get('anthropicApiKey') || process.env.ANTHROPIC_API_KEY;
+      let apiKey = await getApiKey(context);
 
       if (!apiKey) {
         const action = await vscode.window.showWarningMessage(
@@ -331,6 +365,7 @@ function activate(context) {
           });
         }
         if (!apiKey) return;
+        await storeApiKey(context, apiKey);
       }
 
       const model = config.get('model', 'claude-sonnet-4-20250514');
@@ -342,7 +377,7 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('grim.annotateWorkspace', async () => {
       const config = vscode.workspace.getConfiguration('grim');
-      let apiKey = config.get('anthropicApiKey') || process.env.ANTHROPIC_API_KEY;
+      let apiKey = await getApiKey(context);
 
       if (!apiKey) {
         const action = await vscode.window.showWarningMessage(
@@ -361,6 +396,7 @@ function activate(context) {
           });
         }
         if (!apiKey) return;
+        await storeApiKey(context, apiKey);
       }
 
       const model = config.get('model', 'claude-sonnet-4-20250514');
@@ -372,6 +408,41 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('grim.eraseComments', async () => {
       await eraseAllComments();
+    })
+  );
+
+  // ─── Command: Export Agent Context (.grimoire-context.md for AI coding agents) ───
+  context.subscriptions.push(
+    vscode.commands.registerCommand('grim.exportContext', async () => {
+      const workspacePath = getWorkspacePath();
+      if (!workspacePath) return;
+
+      let mapData;
+      const jsonPath = path.join(workspacePath, '.grimoire.json');
+      if (fs.existsSync(jsonPath)) {
+        try { mapData = JSON.parse(fs.readFileSync(jsonPath, 'utf8')); } catch { /* fall through to tree provider */ }
+      }
+      if (!mapData) {
+        const tree = treeProvider.getData();
+        if (!tree) {
+          vscode.window.showWarningMessage('Grimoire: No map yet. Run "Grimoire: Scan Workspace" first.');
+          return;
+        }
+        mapData = { tree };
+      }
+
+      const outPath = writeAgentContext(workspacePath, mapData);
+      if (outPath) {
+        const action = await vscode.window.showInformationMessage(
+          'Grimoire: Wrote .grimoire-context.md — a compact repo map your AI coding agent can load.',
+          'Open'
+        );
+        if (action === 'Open') {
+          vscode.workspace.openTextDocument(vscode.Uri.file(outPath)).then(doc => vscode.window.showTextDocument(doc));
+        }
+      } else {
+        vscode.window.showErrorMessage('Grimoire: Could not write .grimoire-context.md.');
+      }
     })
   );
 
@@ -412,64 +483,145 @@ function autoLoadExisting() {
   }
 }
 
-function addToGitignore(workspacePath) {
+// Ensure .grimoire.json is gitignored. It can contain source-code snippets, so it
+// should not be committed. Silent when already present (called after every scan).
+function ensureGitignored(workspacePath) {
   const gitignorePath = path.join(workspacePath, '.gitignore');
   try {
     let content = '';
     if (fs.existsSync(gitignorePath)) {
       content = fs.readFileSync(gitignorePath, 'utf8');
     }
-    if (!content.includes('.grimoire.json')) {
-      const line = content.endsWith('\n') || !content ? '.grimoire.json\n' : '\n.grimoire.json\n';
-      fs.appendFileSync(gitignorePath, line);
-      vscode.window.showInformationMessage('Added .grimoire.json to .gitignore');
-    } else {
-      vscode.window.showInformationMessage('.grimoire.json is already in .gitignore');
-    }
+    if (content.includes('.grimoire.json')) return; // already ignored — stay quiet
+    const line = !content || content.endsWith('\n') ? '.grimoire.json\n' : '\n.grimoire.json\n';
+    fs.appendFileSync(gitignorePath, line);
+    vscode.window.showInformationMessage('Grimoire: Added .grimoire.json to .gitignore (it can contain code snippets).');
   } catch (err) {
-    vscode.window.showWarningMessage(`Could not update .gitignore: ${err.message}`);
+    console.warn('Grimoire: Could not update .gitignore:', err.message);
+  }
+}
+
+// Load the previously saved .grimoire.json (for incremental re-scans). Returns null if absent/invalid.
+function loadPreviousMap(workspacePath) {
+  try {
+    const p = path.join(workspacePath, '.grimoire.json');
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (err) {
+    console.warn('Grimoire: could not load previous map for incremental scan:', err.message);
+    return null;
+  }
+}
+
+// Write the agent-context Markdown (.grimoire-context.md). Returns the path on success.
+function writeAgentContext(workspacePath, mapData) {
+  try {
+    const md = buildAgentContext(mapData);
+    const outPath = path.join(workspacePath, '.grimoire-context.md');
+    fs.writeFileSync(outPath, md);
+    return outPath;
+  } catch (err) {
+    console.warn('Grimoire: Could not write agent context:', err.message);
+    return null;
+  }
+}
+
+// Auto-export the agent context after a scan, unless disabled via grim.agentContext.
+function writeAgentContextIfEnabled(workspacePath, mapData) {
+  if (!vscode.workspace.getConfiguration('grim').get('agentContext', true)) return;
+  writeAgentContext(workspacePath, mapData);
+}
+
+// ─── API key (SecretStorage) ───
+
+// Resolve the Anthropic API key from the most secure source available:
+//   1. VS Code SecretStorage (encrypted, preferred)
+//   2. ANTHROPIC_API_KEY environment variable
+//   3. Legacy plaintext setting — migrated into SecretStorage, then cleared
+async function getApiKey(context) {
+  const fromSecret = await context.secrets.get(API_KEY_SECRET);
+  if (fromSecret) return fromSecret;
+
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+
+  const config = vscode.workspace.getConfiguration('grim');
+  const legacy = config.get('anthropicApiKey');
+  if (legacy) {
+    try {
+      await context.secrets.store(API_KEY_SECRET, legacy);
+      await config.update('anthropicApiKey', undefined, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage('Grimoire: Moved your API key into VS Code Secret Storage for safer, encrypted storage.');
+    } catch (err) {
+      console.warn('Grimoire: API key migration failed:', err.message);
+    }
+    return legacy;
+  }
+
+  return undefined;
+}
+
+// Persist a key (e.g. one entered manually via the command palette) to SecretStorage.
+async function storeApiKey(context, key) {
+  if (!key) return;
+  try {
+    await context.secrets.store(API_KEY_SECRET, key);
+  } catch (err) {
+    console.warn('Grimoire: Could not store API key in SecretStorage:', err.message);
   }
 }
 
 // ─── AI API calls ───
 
 async function callClaudeAPI(apiKey, allPaths, readme, model, batchSize, snippets, progress, token, plainEnglish = true) {
-  const https = require('https');
   const allDescs = {};
   const effectiveBatch = snippets && Object.keys(snippets).length ? Math.min(batchSize, 20) : batchSize;
   const batches = [];
   for (let i = 0; i < allPaths.length; i += effectiveBatch) {
     batches.push(allPaths.slice(i, i + effectiveBatch));
   }
+  if (batches.length === 0) return { descs: allDescs, failedBatches: 0 };
 
-  for (let i = 0; i < batches.length; i++) {
-    if (token?.isCancellationRequested) break;
+  // Run batches through a bounded concurrency pool. Retry/backoff is handled by the
+  // shared client; failed batches are counted (not silently dropped) so the caller
+  // can tell the user those items kept heuristic descriptions.
+  const concurrency = Math.max(1, Math.min(vscode.workspace.getConfiguration('grim').get('maxConcurrency', 5), 12));
+  let nextIndex = 0;
+  let completed = 0;
+  let failedBatches = 0;
 
-    const batch = batches[i];
-    const pct = Math.round((i / batches.length) * 60) + 30;
-    progress.report({ increment: 0, message: `AI batch ${i + 1}/${batches.length}...` });
-
+  const runBatch = async (batch) => {
     const batchSnippets = {};
     if (snippets) {
       for (const p of batch) {
         if (snippets[p]) batchSnippets[p] = snippets[p];
       }
     }
-
     const prompt = buildPrompt(batch, readme, Object.keys(batchSnippets).length ? batchSnippets : null, plainEnglish);
+    const text = await callAnthropic({ apiKey, model, prompt, maxTokens: 8192 }, token);
+    Object.assign(allDescs, parseJsonResponse(text));
+  };
 
-    try {
-      const response = await httpPost(apiKey, model, prompt);
-      const text = response.content?.map(b => b.text || '').join('') || '';
-      const clean = text.replace(/```json|```/g, '').trim();
-      const descs = JSON.parse(clean);
-      Object.assign(allDescs, descs);
-    } catch (err) {
-      console.warn(`Grimoire: Batch ${i + 1} error:`, err.message);
+  const worker = async () => {
+    while (true) {
+      if (token?.isCancellationRequested) return;
+      const i = nextIndex++;
+      if (i >= batches.length) return;
+      try {
+        await runBatch(batches[i]);
+      } catch (err) {
+        if (err.message === 'Cancelled') return;
+        console.warn(`Grimoire: description batch ${i + 1} failed:`, err.message);
+        failedBatches++;
+      } finally {
+        completed++;
+        // Spread the 30→90 progress band across batches as they finish.
+        progress.report({ increment: (1 / batches.length) * 60, message: `AI descriptions: ${completed}/${batches.length} batches...` });
+      }
     }
-  }
+  };
 
-  return allDescs;
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return { descs: allDescs, failedBatches };
 }
 
 function buildPrompt(paths, readme, snippets, plainEnglish = true) {
@@ -498,46 +650,6 @@ function buildPrompt(paths, readme, snippets, plainEnglish = true) {
   }
 
   return `${instructions}\n\nPaths:\n${pathList}\n\nRespond ONLY with a JSON object mapping each path to its description. No markdown fences, no preamble.\nExample: ${example}`;
-}
-
-function httpPost(apiKey, model, prompt) {
-  return new Promise((resolve, reject) => {
-    const data = JSON.stringify({
-      model,
-      max_tokens: 8192,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const options = {
-      hostname: 'api.anthropic.com',
-      port: 443,
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(data),
-      },
-    };
-
-    const req = require('https').request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => body += chunk);
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(body));
-        } catch (e) {
-          reject(new Error(`Invalid JSON response: ${body.slice(0, 200)}`));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(120000, () => { req.destroy(); reject(new Error('Request timed out')); });
-    req.write(data);
-    req.end();
-  });
 }
 
 function deactivate() {
