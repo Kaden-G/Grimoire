@@ -53,6 +53,24 @@ Find files by name, description, tag, or path. `Cmd+K` / `Ctrl+K` opens search f
 ### Floating Toolbar
 Adjust text size (S / M / L) and toggle Plain English mode without leaving the map.
 
+### Agent Context for AI Coding Agents
+Every scan exports a compact, token-budgeted `.grimoire-context.md` — a Markdown map of your repo (`path — what it does [tags]`) sized to fit an agent's context window (~15-25k tokens for a 500-file repo, vs 1M+ to read every file). Drop it into your prompt, or let agents read it, so they find the right file *before* editing instead of grepping blindly. Run **Grimoire: Export Agent Context** to regenerate manually, or toggle auto-export with `grim.agentContext`.
+
+### MCP Server (live queries for agents)
+Grimoire ships with a **zero-dependency** [Model Context Protocol](https://modelcontextprotocol.io) server (`mcp/grimoire-mcp-server.js` — Node builtins only, no `npm install`). Point Cursor, Claude Desktop/Code, or Windsurf at it and your agent gets four tools backed by your map:
+
+| Tool | What it answers |
+|------|-----------------|
+| `repo_overview` | Project shape — counts, tags in use, top-level directories |
+| `find_files` | "Where do I change X?" — searches paths, descriptions, and tags |
+| `file_purpose` | What a specific file or directory does |
+| `files_with_tag` | Every file for a capability tag (`auth`, `database`, …) |
+
+Setup snippets for each client are in [`mcp/README.md`](mcp/README.md).
+
+### Living Incremental Scans
+Re-scanning only re-describes files whose header changed — unchanged files reuse their previous description. Keeping your map (and the exported agent context) fresh after edits costs only the changed files, not the whole repo. On by default via `grim.incremental`.
+
 ---
 
 ## Quick Start
@@ -80,6 +98,7 @@ For AI-powered descriptions, add your Anthropic API key:
 | **Grimoire: Search by Tag** | Filter files by import-based tags |
 | **Grimoire: Erase All Comments** | Remove all ᚲ Grimoire comments and delete `.grimoire.json` |
 | **Grimoire: Setup / API Key** | Configure your API key or join the Pro waitlist |
+| **Grimoire: Export Agent Context** | Write `.grimoire-context.md` — a compact repo map for AI coding agents / MCP |
 
 ---
 
@@ -92,6 +111,8 @@ For AI-powered descriptions, add your Anthropic API key:
 | `grim.batchSize` | `20` | Files per AI batch request |
 | `grim.exclude` | `[]` | Additional directories to exclude |
 | `grim.scanHeaders` | `true` | Read file headers for better context |
+| `grim.agentContext` | `true` | Auto-write `.grimoire-context.md` (agent map) after each scan |
+| `grim.incremental` | `true` | Reuse descriptions for unchanged files on re-scan (only re-describe changes) |
 | `grim.plainEnglish` | `true` | Use plain English descriptions (no jargon) |
 | `grim.commentStrategy` | `replace` | How to handle existing ᚲ comments: `replace`, `merge`, or `ask` |
 | `grim.defaultAnnotationMode` | `tutor` | Default annotation mode |
@@ -104,6 +125,7 @@ For AI-powered descriptions, add your Anthropic API key:
 - Grimoire does **not** collect telemetry, analytics, or usage data.
 - Your code is sent to the Anthropic API only when you explicitly run an AI command (Scan with AI, Annotate). It is **never** sent automatically.
 - The `.grimoire.json` file stays in your project folder. You can `.gitignore` it.
+- The `.grimoire-context.md` agent map contains only paths, descriptions, and tags (no source code), so it's safe to commit for your team's AI agents.
 
 ---
 
