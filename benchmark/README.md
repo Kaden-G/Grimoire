@@ -19,6 +19,8 @@ and map builder the extension uses — so the numbers reflect actual behavior.
 
 ## Usage
 
+> Requires **Python 3.10+** (both `grimoire.py` and this benchmark use 3.10+ syntax).
+
 ```bash
 # Benchmark this repo (uses .grimoire.json if present, else a heuristic scan)
 python benchmark/token_benchmark.py .

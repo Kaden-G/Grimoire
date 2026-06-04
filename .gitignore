@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 node_modules/
 .env
+
+# Grimoire generated maps
+.grimoire.json
+.grimoire-context.md

@@ -1050,6 +1050,8 @@ def main():
         description="🗺️  Grimoire — Map your codebase with AI-powered descriptions",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Requires Python 3.10+
+
 Examples:
   python grimoire.py ./my-project
   python grimoire.py ./my-project --key sk-ant-api03-...
@@ -1063,17 +1065,34 @@ Examples:
         """,
     )
 
-    subparsers = parser.add_subparsers(dest="command")
-
     # ─── Annotate subcommand ───
-    ann_parser = subparsers.add_parser("annotate", help="Add AI-generated inline comments to a file")
-    ann_parser.add_argument("file", help="Path to the file to annotate")
-    ann_parser.add_argument("--mode", choices=["tutor", "minimal", "technical", "non-technical"],
-                            default="tutor", help="Annotation style (default: tutor)")
-    ann_parser.add_argument("--key", help="Anthropic API key (or set ANTHROPIC_API_KEY env var)")
-    ann_parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Claude model to use")
-    ann_parser.add_argument("--output", help="Output file path (default: <file>.annotated.<ext>)")
-    ann_parser.add_argument("--in-place", action="store_true", help="Overwrite the original file")
+    # NOTE: argparse subparsers are a positional action, so they greedily match
+    # the FIRST positional token against the subcommand names. If we registered
+    # the subparser on `parser` directly, alongside the optional scan `path`
+    # positional below, then `grimoire.py ./my-project` would fail with
+    # "invalid choice: './my-project'". To avoid that, only engage the annotate
+    # subparser when "annotate" is actually the first argument; otherwise parse
+    # purely as a scan (path + scan options).
+    if len(sys.argv) > 1 and sys.argv[1] == "annotate":
+        ann_parser = argparse.ArgumentParser(
+            prog="grimoire.py annotate",
+            description="Add AI-generated inline comments to a file",
+        )
+        ann_parser.add_argument("file", help="Path to the file to annotate")
+        ann_parser.add_argument("--mode", choices=["tutor", "minimal", "technical", "non-technical"],
+                                default="tutor", help="Annotation style (default: tutor)")
+        ann_parser.add_argument("--key", help="Anthropic API key (or set ANTHROPIC_API_KEY env var)")
+        ann_parser.add_argument("--model", default="claude-sonnet-4-20250514", help="Claude model to use")
+        ann_parser.add_argument("--output", help="Output file path (default: <file>.annotated.<ext>)")
+        ann_parser.add_argument("--in-place", action="store_true", help="Overwrite the original file")
+        ann_args = ann_parser.parse_args(sys.argv[2:])
+        ann_args.command = "annotate"
+        annotate_command(ann_args)
+        return
+
+    # The annotate subcommand is handled above; for plain scans there is no
+    # subcommand. Default it so the routing check below stays valid.
+    parser.set_defaults(command=None)
 
     # ─── Scan (default) arguments ───
     parser.add_argument("path", nargs="?", help="Path to the project directory")
@@ -1094,11 +1113,6 @@ Examples:
                         help="Re-describe every file (disable incremental reuse from a previous .grimoire.json)")
 
     args = parser.parse_args()
-
-    # Route to annotate subcommand if used
-    if args.command == "annotate":
-        annotate_command(args)
-        return
 
     if not args.path:
         parser.print_help()
