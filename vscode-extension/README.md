@@ -8,9 +8,11 @@ Built for **vibe coders**, non-technical teammates, and anyone who inherits a co
 
 ---
 
-### What's New in 0.5.0
+### What's New in 0.6.0
 
-- unify scan commands, replace treemap with grid layout, add inline strip option
+- **Agent context export** — every scan writes a compact `.grimoire-context.md` repo map that AI coding agents (Cursor, Claude Code, Copilot, …) can load for instant orientation. Run **Grimoire: Export Agent Context** to regenerate it anytime.
+- **MCP server** — serve your repo map to AI agents over the Model Context Protocol so they can answer "where does X live?" from the map instead of grepping the whole codebase. See `mcp/README.md`.
+- **Incremental scans** — re-scans reuse AI descriptions for unchanged files and only re-describe what changed, keeping the map fresh for a fraction of the cost.
 
 ## Features
 

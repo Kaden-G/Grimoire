@@ -114,5 +114,5 @@ jobs:
             echo "### Published v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "- **Tag**: v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Marketplace**: [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=godinez-llc.grimoire)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Marketplace**: [View on Marketplace](https://marketplace.visualstudio.com/items?itemName=godinez-llc.grimoire-ai)" >> $GITHUB_STEP_SUMMARY
           fi
