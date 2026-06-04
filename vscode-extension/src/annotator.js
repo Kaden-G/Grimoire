@@ -14,6 +14,7 @@ const {
   stripGrimoireCommentsByMode,
   countGrimoireComments,
 } = require('./commentTagger');
+const { callAnthropic } = require('./anthropic');
 
 // ─── Annotation Mode Definitions ───
 
@@ -409,65 +410,11 @@ class AnnotatedContentProvider {
 }
 
 // ─── API Call ───
-
-async function callAnnotationAPI(apiKey, model, prompt, token) {
-  return new Promise((resolve, reject) => {
-    if (token?.isCancellationRequested) {
-      reject(new Error('Cancelled'));
-      return;
-    }
-
-    const data = JSON.stringify({
-      model,
-      max_tokens: 16384,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const options = {
-      hostname: 'api.anthropic.com',
-      port: 443,
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(data),
-      },
-    };
-
-    const req = require('https').request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => body += chunk);
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(body);
-          if (parsed.error) {
-            reject(new Error(parsed.error.message || 'API error'));
-            return;
-          }
-          const text = parsed.content?.map(b => b.text || '').join('') || '';
-          if (!text) {
-            reject(new Error('Empty response from Claude'));
-            return;
-          }
-          resolve(text);
-        } catch (e) {
-          reject(new Error(`Invalid response: ${body.slice(0, 200)}`));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(180000, () => { req.destroy(); reject(new Error('Request timed out (3 min)')); });
-
-    if (token) {
-      token.onCancellationRequested(() => { req.destroy(); reject(new Error('Cancelled')); });
-    }
-
-    req.write(data);
-    req.end();
-  });
+// Retry, exponential backoff, and cancellation are handled by the shared Anthropic
+// client (./anthropic). Inline annotation needs a larger output budget than the
+// description batches, hence maxTokens: 16384.
+function callAnnotationAPI(apiKey, model, prompt, token) {
+  return callAnthropic({ apiKey, model, prompt, maxTokens: 16384 }, token);
 }
 
 // ─── Bulk Workspace Annotation ───
@@ -479,7 +426,66 @@ const ANNOTATABLE_EXTENSIONS = new Set([
   '.sql', '.sh', '.bash', '.zsh',
 ]);
 
-async function annotateWorkspace(apiKey, model) {
+// Language labels for bulk annotation prompts, keyed by extension.
+const BULK_LANGUAGE_MAP = {
+  '.js': 'JavaScript', '.jsx': 'JavaScript (React)', '.ts': 'TypeScript',
+  '.tsx': 'TypeScript (React)', '.py': 'Python', '.java': 'Java',
+  '.cs': 'C#', '.cpp': 'C++', '.c': 'C', '.h': 'C/C++ Header',
+  '.go': 'Go', '.rs': 'Rust', '.rb': 'Ruby', '.php': 'PHP',
+  '.swift': 'Swift', '.kt': 'Kotlin', '.scala': 'Scala',
+  '.dart': 'Dart', '.lua': 'Lua', '.r': 'R', '.pl': 'Perl',
+  '.ex': 'Elixir', '.exs': 'Elixir', '.hs': 'Haskell',
+  '.vue': 'Vue', '.svelte': 'Svelte', '.css': 'CSS', '.scss': 'SCSS',
+  '.sql': 'SQL', '.sh': 'Bash', '.bash': 'Bash', '.zsh': 'Zsh',
+};
+
+// ─── Incremental annotation cache ───
+// Stores a sha256 of each file's CODE (Grimoire comments stripped) at the time it was
+// last annotated. On re-run, files whose code is unchanged AND already carry the target
+// mode's comments are skipped — turning a multi-minute re-annotate into seconds.
+const CACHE_FILE = '.grimoire-cache.json';
+
+function hashCode(text) {
+  return require('crypto').createHash('sha256').update(text).digest('hex');
+}
+
+function loadAnnotationCache(workspacePath) {
+  const fs = require('fs');
+  const path = require('path');
+  try {
+    const p = path.join(workspacePath, CACHE_FILE);
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (data && typeof data === 'object' && data.files) return data;
+    }
+  } catch { /* ignore corrupt cache — treat as empty */ }
+  return { version: 1, files: {} };
+}
+
+function ensureIgnored(workspacePath, entry) {
+  const fs = require('fs');
+  const path = require('path');
+  try {
+    const gi = path.join(workspacePath, '.gitignore');
+    let content = fs.existsSync(gi) ? fs.readFileSync(gi, 'utf8') : '';
+    if (content.includes(entry)) return;
+    const line = !content || content.endsWith('\n') ? `${entry}\n` : `\n${entry}\n`;
+    fs.appendFileSync(gi, line);
+  } catch { /* best-effort */ }
+}
+
+function saveAnnotationCache(workspacePath, cache) {
+  const fs = require('fs');
+  const path = require('path');
+  try {
+    fs.writeFileSync(path.join(workspacePath, CACHE_FILE), JSON.stringify(cache, null, 2));
+    ensureIgnored(workspacePath, CACHE_FILE);
+  } catch (err) {
+    console.warn('[Grimoire] Could not write annotation cache:', err.message);
+  }
+}
+
+async function annotateWorkspace(apiKey, model, presetMode) {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders || !workspaceFolders.length) {
     vscode.window.showWarningMessage('Grimoire: No workspace folder open.');
@@ -522,32 +528,41 @@ async function annotateWorkspace(apiKey, model) {
   }
 
   // ─── Mode selection ───
-  const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
-    label: mode.label,
-    description: mode.description,
-    detail: mode.detail,
-    _key: key,
-  }));
+  // When invoked from the scan flow, the user has already chosen a mode — honor it
+  // and skip the picker (the git-safety and file-count confirmations below still run).
+  let selectedKey;
+  if (presetMode && ANNOTATION_MODES[presetMode]) {
+    selectedKey = presetMode;
+  } else {
+    const modeItems = Object.entries(ANNOTATION_MODES).map(([key, mode]) => ({
+      label: mode.label,
+      description: mode.description,
+      detail: mode.detail,
+      _key: key,
+    }));
 
-  modeItems.push({
-    label: '$(trash) Strip All Grimoire Comments',
-    description: 'Remove all ᚲ comments from every file in this workspace',
-    detail: 'Walks the workspace, strips every Grimoire-generated comment, and deletes .grimoire.json. Your code is preserved.',
-    _key: '_erase_all',
-  });
+    modeItems.push({
+      label: '$(trash) Strip All Grimoire Comments',
+      description: 'Remove all ᚲ comments from every file in this workspace',
+      detail: 'Walks the workspace, strips every Grimoire-generated comment, and deletes .grimoire.json. Your code is preserved.',
+      _key: '_erase_all',
+    });
 
-  const selected = await vscode.window.showQuickPick(modeItems, {
-    placeHolder: 'Choose annotation style for all files',
-    title: 'Bulk Annotate Workspace',
-  });
-  if (!selected) return;
+    const selected = await vscode.window.showQuickPick(modeItems, {
+      placeHolder: 'Choose annotation style for all files',
+      title: 'Bulk Annotate Workspace',
+    });
+    if (!selected) return;
 
-  if (selected._key === '_erase_all') {
-    await eraseAllComments();
-    return;
+    if (selected._key === '_erase_all') {
+      await eraseAllComments();
+      return;
+    }
+
+    selectedKey = selected._key;
   }
 
-  const mode = ANNOTATION_MODES[selected._key];
+  const mode = ANNOTATION_MODES[selectedKey];
 
   // ─── Collect annotatable files ───
   const config = vscode.workspace.getConfiguration('grim');
@@ -599,89 +614,100 @@ async function annotateWorkspace(apiKey, model) {
   }
 
   const confirm = await vscode.window.showInformationMessage(
-    `Grimoire will annotate ${files.length} files in-place using "${selected._key}" mode. This will call the Claude API for each file.`,
+    `Grimoire will annotate up to ${files.length} files in-place using "${selectedKey}" mode (unchanged files already annotated in this mode are skipped automatically). Changed files are sent to the Claude API.`,
     { modal: true },
     `Annotate ${files.length} Files`,
     'Cancel'
   );
   if (confirm !== `Annotate ${files.length} Files`) return;
 
-  // ─── Process files ───
+  // ─── Process files (concurrent pool + incremental cache) ───
   let succeeded = 0;
   let failed = 0;
-  let skipped = 0;
+  let skipped = 0;            // not reached due to cancellation
+  let skippedUnchanged = 0;   // skipped via cache (code unchanged, already annotated)
 
   // FIX: track per-file failure reasons so we can surface them in the summary
   const failureLog = [];
 
+  const bulkStrategy = config.get('commentStrategy', 'replace');
+  const concurrency = Math.max(1, Math.min(config.get('maxConcurrency', 5), 12));
+  const cache = loadAnnotationCache(workspacePath);
+
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'Grimoire: Annotating workspace...',
+      title: `Grimoire: Annotating workspace (${concurrency} at a time)...`,
       cancellable: true,
     },
     async (progress, token) => {
-      for (let i = 0; i < files.length; i++) {
-        if (token.isCancellationRequested) {
-          skipped = files.length - i;
-          break;
+      let completed = 0;
+      let nextIndex = 0;
+
+      const processFile = async (filePath, relPath) => {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const strippedCode = stripGrimoireComments(content).stripped;
+        const hash = hashCode(strippedCode);
+
+        // Skip when the underlying code is unchanged AND this mode is already present.
+        const cached = cache.files[relPath];
+        if (cached && cached.hash === hash && detectModes(content).includes(selectedKey)) {
+          return 'unchanged';
         }
 
-        const filePath = files[i];
-        const fileName = path.basename(filePath);
-        const relPath = path.relative(workspacePath, filePath);
-        progress.report({
-          increment: (1 / files.length) * 100,
-          message: `(${i + 1}/${files.length}) ${relPath}`,
-        });
+        const codeToSend = bulkStrategy === 'replace' ? strippedCode : content;
+        const ext = path.extname(filePath).toLowerCase();
+        const language = BULK_LANGUAGE_MAP[ext] || ext.slice(1);
+        const prompt = mode.prompt(codeToSend, path.basename(filePath), language);
 
-        try {
-          let code = fs.readFileSync(filePath, 'utf8');
+        let annotated = await callAnnotationAPI(apiKey, model, prompt, token);
+        annotated = annotated.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/, '');
+        fs.writeFileSync(filePath, annotated, 'utf8');
 
-          const bulkConfig = vscode.workspace.getConfiguration('grim');
-          const bulkStrategy = bulkConfig.get('commentStrategy', 'replace');
-          if (bulkStrategy === 'replace' && hasGrimoireComments(code)) {
-            const { stripped } = stripGrimoireComments(code);
-            code = stripped;
+        // Cache the hash of the underlying code (annotation only adds comments).
+        cache.files[relPath] = { hash, mode: selectedKey, at: Date.now() };
+        return 'annotated';
+      };
+
+      const worker = async () => {
+        while (true) {
+          if (token.isCancellationRequested) return;
+          const i = nextIndex++;
+          if (i >= files.length) return;
+
+          const filePath = files[i];
+          const relPath = path.relative(workspacePath, filePath);
+          try {
+            const result = await processFile(filePath, relPath);
+            if (result === 'unchanged') skippedUnchanged++;
+            else succeeded++;
+          } catch (err) {
+            if (err.message === 'Cancelled') return;
+            // FIX: log the full error (not just message) and collect for summary
+            console.error(`[Grimoire] FAILED: "${relPath}" — ${err.message}`, err);
+            failureLog.push({ relPath, reason: err.message });
+            failed++;
+          } finally {
+            completed++;
+            progress.report({
+              increment: (1 / files.length) * 100,
+              message: `(${completed}/${files.length}) ${relPath}`,
+            });
           }
-
-          const ext = path.extname(fileName).toLowerCase();
-          const langMap = {
-            '.js': 'JavaScript', '.jsx': 'JavaScript (React)', '.ts': 'TypeScript',
-            '.tsx': 'TypeScript (React)', '.py': 'Python', '.java': 'Java',
-            '.cs': 'C#', '.cpp': 'C++', '.c': 'C', '.h': 'C/C++ Header',
-            '.go': 'Go', '.rs': 'Rust', '.rb': 'Ruby', '.php': 'PHP',
-            '.swift': 'Swift', '.kt': 'Kotlin', '.scala': 'Scala',
-            '.dart': 'Dart', '.lua': 'Lua', '.r': 'R', '.pl': 'Perl',
-            '.ex': 'Elixir', '.exs': 'Elixir', '.hs': 'Haskell',
-            '.vue': 'Vue', '.svelte': 'Svelte', '.css': 'CSS', '.scss': 'SCSS',
-            '.sql': 'SQL', '.sh': 'Bash', '.bash': 'Bash', '.zsh': 'Zsh',
-          };
-          const language = langMap[ext] || ext.slice(1);
-
-          const prompt = mode.prompt(code, fileName, language);
-          let annotated = await callAnnotationAPI(apiKey, model, prompt, token);
-
-          annotated = annotated.replace(/^```[\w]*\n?/, '').replace(/\n?```\s*$/, '');
-
-          fs.writeFileSync(filePath, annotated, 'utf8');
-          succeeded++;
-        } catch (err) {
-          // FIX: log the full error (not just message) and collect for summary
-          console.error(`[Grimoire] FAILED: "${relPath}" — ${err.message}`, err);
-          failureLog.push({ relPath, reason: err.message });
-          failed++;
         }
+      };
 
-        if (i < files.length - 1) {
-          await new Promise(r => setTimeout(r, 500));
-        }
-      }
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
     }
   );
 
+  // Persist the cache so the next run can skip unchanged files.
+  saveAnnotationCache(workspacePath, cache);
+  skipped = files.length - succeeded - failed - skippedUnchanged;
+
   // ─── Summary ───
-  let summary = `Grimoire: Annotated ${succeeded} files with "${selected._key}" comments.`;
+  let summary = `Grimoire: Annotated ${succeeded} files with "${selectedKey}" comments.`;
+  if (skippedUnchanged > 0) summary += ` ${skippedUnchanged} unchanged (skipped).`;
   if (failed > 0) summary += ` ${failed} failed.`;
   if (skipped > 0) summary += ` ${skipped} skipped (cancelled).`;
 
@@ -836,6 +862,14 @@ async function eraseAllComments() {
         } catch (err) {
           console.error(`[Grimoire] Failed to delete .grimoire.json: ${err.message}`);
         }
+      }
+
+      // Also remove the incremental annotation cache so future runs start fresh.
+      try {
+        const cachePath = path.join(workspacePath, CACHE_FILE);
+        if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+      } catch (err) {
+        console.error(`[Grimoire] Failed to delete ${CACHE_FILE}: ${err.message}`);
       }
     }
   );

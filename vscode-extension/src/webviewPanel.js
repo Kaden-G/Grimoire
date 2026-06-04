@@ -6,6 +6,30 @@
 
 const vscode = require('vscode');
 
+// Generate a random nonce for the webview Content-Security-Policy so we can allow
+// our single inline <script> without 'unsafe-inline'.
+function makeNonce() {
+  let text = '';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) text += chars.charAt(Math.floor(Math.random() * chars.length));
+  return text;
+}
+
+// Serialize data for safe embedding inside an inline <script> tag. JSON.stringify
+// does NOT escape "</script>" or the U+2028/U+2029 line separators, which can break
+// out of the script context (a stored-XSS / render-breakage vector when file
+// snippets contain "</script>", e.g. Vue/Svelte single-file components).
+function safeJsonForScript(value) {
+  const json = JSON.stringify(value);
+  if (json === undefined) return 'null'; // JSON.stringify(undefined) -> undefined
+  return json
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 class GrimoirePanel {
   static currentPanel = null;
   static viewType = 'grimMap';
@@ -86,13 +110,14 @@ class GrimoirePanel {
     const basePath = this._basePath;
     const snippets = this._snippets;
     const plainEnglishSetting = vscode.workspace.getConfiguration('grim').get('plainEnglish', true);
+    const nonce = makeNonce();
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data:;">
 <style>
   :root {
     --bg: #0a0e17; --surface: #111827; --surface-hover: #1a2236;
@@ -292,17 +317,17 @@ class GrimoirePanel {
 </head>
 <body>
 <div id="app"></div>
-<script>
+<script nonce="${nonce}">
 const vscodeApi = acquireVsCodeApi();
-const DATA = ${JSON.stringify(data)};
-const BASE_PATH = ${JSON.stringify(basePath)};
-const SNIPPETS = ${JSON.stringify(snippets)};
+const DATA = ${safeJsonForScript(data)};
+const BASE_PATH = ${safeJsonForScript(basePath)};
+const SNIPPETS = ${safeJsonForScript(snippets)};
 
 // ─── State ───
 let currentPath = [];
 let searchQuery = '';
 let textSize = 'medium';
-let plainEnglish = ${JSON.stringify(plainEnglishSetting)};
+let plainEnglish = ${safeJsonForScript(plainEnglishSetting)};
 let hoveredCell = null;
 let containerW = 800;
 let containerH = 500;
@@ -470,13 +495,7 @@ function cutRect(row, rect) {
 
 // ─── Tag rendering ───
 function renderTag(tag, sz) {
-  const tagClass = 'tag-' + tag.replace(/[^a-z0-9-]/gi, '');
   return '<span class="tag mono tag-' + esc(tag) + '" style="font-size:' + (sz || 10) + 'px">' + esc(tag) + '</span>';
-}
-
-function renderTags(tags, sz) {
-  if (!tags || !tags.length) return '';
-  return '<div class="tags">' + tags.map(t => renderTag(t, sz)).join('') + '</div>';
 }
 
 // ─── Render ───

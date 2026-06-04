@@ -1,5 +1,6 @@
 .vscode/**
 .vscode-test/**
+.claude/**
 node_modules/**
 .gitignore
 .vscodeignore
@@ -10,3 +11,4 @@ INSTALL.md
 src/__tests__/**
 *.vsix
 .grimoire.json
+.grimoire-context.md

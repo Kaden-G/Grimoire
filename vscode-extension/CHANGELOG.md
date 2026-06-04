@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 — 2026-06-03
+
+### Features
+- Agent context export: each scan writes a compact `.grimoire-context.md` repo map for AI coding agents, plus a **Grimoire: Export Agent Context** command (ef8cf59)
+- MCP server (`mcp/grimoire-mcp-server.js`) to serve the repo map to AI agents over the Model Context Protocol (ef8cf59)
+- Incremental scans: reuse AI descriptions for unchanged files and only re-describe what changed (ef8cf59)
+
+### Documentation
+- Document agent context export, the MCP server, and incremental scans (1d18e90)
+- Add token-savings benchmark comparing full repo reads vs the Grimoire map/MCP (0a1a8e5)
+
+### Maintenance
+- Fix repo URLs, add F5 launch config, exclude generated context from the package (f96e68e)
+
 ## 0.5.0 — 2026-04-02
 
 ### Features

@@ -2,17 +2,17 @@
   "name": "grimoire-ai",
   "displayName": "Grimoire — AI Codebase Map",
   "description": "Your codebase, decoded — AI-powered treemap visualization, inline annotation, import-based tags, and plain-English descriptions for any project",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "godinez-llc",
   "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/grimoire-dev/grimoire"
+    "url": "https://github.com/Kaden-G/Grimoire"
   },
   "homepage": "https://grimoire.dev",
   "bugs": {
-    "url": "https://github.com/grimoire-dev/grimoire/issues"
+    "url": "https://github.com/Kaden-G/Grimoire/issues"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -109,6 +109,11 @@
         "command": "grim.setup",
         "title": "Grimoire: Setup / API Key",
         "icon": "$(key)"
+      },
+      {
+        "command": "grim.exportContext",
+        "title": "Grimoire: Export Agent Context",
+        "icon": "$(robot)"
       }
     ],
     "menus": {
@@ -148,7 +153,8 @@
         "grim.anthropicApiKey": {
           "type": "string",
           "default": "",
-          "description": "Anthropic API key for AI-powered descriptions (or set ANTHROPIC_API_KEY env var)"
+          "markdownDescription": "API keys are now stored in VS Code's encrypted Secret Storage via the setup panel (`Grimoire: Setup / API Key`). Any value set here is automatically migrated to Secret Storage and then cleared. For headless setups, prefer the `ANTHROPIC_API_KEY` environment variable.",
+          "markdownDeprecationMessage": "**Deprecated:** storing the API key in settings keeps it in plaintext. Use `Grimoire: Setup / API Key` (encrypted Secret Storage) or the `ANTHROPIC_API_KEY` environment variable instead. Existing values are migrated automatically."
         },
         "grim.model": {
           "type": "string",
@@ -159,6 +165,13 @@
           "type": "number",
           "default": 20,
           "description": "Number of files per AI batch request"
+        },
+        "grim.maxConcurrency": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 12,
+          "markdownDescription": "How many files to annotate in parallel during **Annotate Entire Workspace**. Higher is faster but more likely to hit Anthropic rate limits (Grimoire backs off and retries automatically). Range 1–12."
         },
         "grim.exclude": {
           "type": "array",
@@ -172,6 +185,16 @@
           "type": "boolean",
           "default": true,
           "description": "Read first 40 lines of source files for better AI context and tag inference"
+        },
+        "grim.agentContext": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "After each scan, write a compact `.grimoire-context.md` repo map for AI coding agents (Cursor, Claude Code, Copilot, etc.) to load for instant orientation. Run **Grimoire: Export Agent Context** to regenerate manually."
+        },
+        "grim.incremental": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "On re-scan, reuse AI descriptions for files whose header is unchanged and only send new/changed files to the model. Keeps the map fresh for a fraction of the cost. Disable to always re-describe everything."
         },
         "grim.plainEnglish": {
           "type": "boolean",
@@ -214,8 +237,8 @@
     }
   },
   "scripts": {
-    "test": "node src/__tests__/commentTagger.test.js",
-    "lint": "node -c src/extension.js && node -c src/annotator.js && node -c src/commentTagger.js && node -c src/scanner.js && node -c src/treeProvider.js && node -c src/webviewPanel.js && node -c src/welcomePanel.js",
+    "test": "node src/__tests__/commentTagger.test.js && node src/__tests__/scanner.test.js && node src/__tests__/anthropic.test.js && node src/__tests__/agentContext.test.js && node src/__tests__/mapQuery.test.js && node src/__tests__/incremental.test.js",
+    "lint": "node -c src/extension.js && node -c src/annotator.js && node -c src/anthropic.js && node -c src/agentContext.js && node -c src/mapQuery.js && node -c src/incremental.js && node -c src/commentTagger.js && node -c src/scanner.js && node -c src/treeProvider.js && node -c src/webviewPanel.js && node -c src/welcomePanel.js && node -c mcp/grimoire-mcp-server.js",
     "package": "vsce package --no-dependencies",
     "package:pre": "npm run lint && npm run test",
     "publish": "vsce publish --no-dependencies"

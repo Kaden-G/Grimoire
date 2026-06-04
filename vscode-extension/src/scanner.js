@@ -231,6 +231,33 @@ const BINARY_EXTENSIONS = new Set([
 const MAX_SCAN_LINES = 40;
 const MAX_SCAN_BYTES = 4096;
 
+// ─── Secret redaction ───
+// File-header snippets are written into .grimoire.json AND sent to the Claude API.
+// Redact common credential formats so secrets that appear near the top of a source
+// file don't leak into the saved map or the outbound API request.
+const SECRET_TOKEN_RULES = [
+  /sk-ant-[A-Za-z0-9_\-]{8,}/g,                  // Anthropic API keys
+  /sk-[A-Za-z0-9]{16,}/g,                        // OpenAI-style keys
+  /\bAKIA[0-9A-Z]{16}\b/g,                        // AWS access key id
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,              // GitHub tokens
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,            // Slack tokens
+  /\bAIza[0-9A-Za-z_\-]{20,}\b/g,                 // Google API keys
+  /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g, // private keys
+];
+
+// Quoted assignments to sensitive identifiers, e.g. api_key = "abc123".
+// Only matches quoted string values to avoid redacting ordinary code like getToken().
+const SECRET_ASSIGNMENT_RULE =
+  /((?:api[_-]?key|secret|client[_-]?secret|access[_-]?token|auth[_-]?token|token|password|passwd|pwd|bearer|private[_-]?key)\s*[:=]\s*)(['"])([^'"\n]{6,})(['"])/gi;
+
+function redactSecrets(text) {
+  if (!text) return text;
+  let out = text;
+  for (const re of SECRET_TOKEN_RULES) out = out.replace(re, '***REDACTED***');
+  out = out.replace(SECRET_ASSIGNMENT_RULE, (_m, prefix, q1, _val, q2) => `${prefix}${q1}***REDACTED***${q2}`);
+  return out;
+}
+
 function scanFileHeader(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (BINARY_EXTENSIONS.has(ext)) return null;
@@ -244,7 +271,7 @@ function scanFileHeader(filePath) {
     const content = buffer.toString('utf8', 0, bytesRead);
     const lines = content.split('\n').slice(0, MAX_SCAN_LINES);
     const snippet = lines.join('\n').trim();
-    return snippet || null;
+    return snippet ? redactSecrets(snippet) : null;
   } catch {
     return null;
   }
@@ -405,5 +432,6 @@ module.exports = {
   getHeuristic,
   guessTags,
   inferTagsFromSnippet,
+  redactSecrets,
   DEFAULT_EXCLUDE,
 };
