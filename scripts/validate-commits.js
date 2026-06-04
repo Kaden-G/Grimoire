@@ -35,7 +35,9 @@ function getCommitSubjects(base, count) {
     try {
       execSync(`git fetch origin ${base} --depth=50 2>/dev/null`, { encoding: 'utf8' });
     } catch { /* already fetched or local */ }
-    cmd = `git log origin/${base}..HEAD --format="%s"`;
+    // --no-merges so we skip GitHub's synthetic PR merge commit (and any real
+    // merge commits), which never follow conventional format.
+    cmd = `git log origin/${base}..HEAD --no-merges --format="%s"`;
   } else {
     cmd = `git log -1 --format="%s"`;
   }
